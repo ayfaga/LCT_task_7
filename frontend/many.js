@@ -10,6 +10,7 @@ const previewContent = document.getElementById('previewContent');
 const renameCloseBtn = document.getElementById('renameCloseBtn');
 const cancelRenameBtn = document.getElementById('cancelRenameBtn');
 const saveRenameBtn = document.getElementById('saveRenameBtn');
+const submitManyBtn = document.getElementById('submitManyBtn');
 
 const state = {
   activeRename: null,
@@ -141,20 +142,36 @@ function handleFileInput(type, fileList) {
   renderFileList(type);
 }
 
-document.querySelectorAll('[data-action]').forEach((button) => {
-  button.addEventListener('click', () => {
-    const action = button.dataset.action;
-    const type = button.dataset.type;
-    const index = Number(button.dataset.index);
-    const item = state.fileStore[type][index];
+imageList.addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-action]');
+  if (!button) return;
 
-    if (action === 'preview') openPreview(item);
-    if (action === 'rename') openRenameModal(type, index);
-    if (action === 'delete') {
-      state.fileStore[type].splice(index, 1);
-      renderFileList(type);
-    }
-  });
+  const action = button.dataset.action;
+  const index = Number(button.dataset.index);
+  const item = state.fileStore.image[index];
+
+  if (action === 'preview') openPreview(item);
+  if (action === 'rename') openRenameModal('image', index);
+  if (action === 'delete') {
+    state.fileStore.image.splice(index, 1);
+    renderFileList('image');
+  }
+});
+
+coordList.addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-action]');
+  if (!button) return;
+
+  const action = button.dataset.action;
+  const index = Number(button.dataset.index);
+  const item = state.fileStore.coord[index];
+
+  if (action === 'preview') openPreview(item);
+  if (action === 'rename') openRenameModal('coord', index);
+  if (action === 'delete') {
+    state.fileStore.coord.splice(index, 1);
+    renderFileList('coord');
+  }
 });
 
 document.querySelectorAll('.add-file-btn').forEach((button) => {
@@ -187,6 +204,15 @@ previewModal.addEventListener('click', (event) => {
 
 renameModal.addEventListener('click', (event) => {
   if (event.target.dataset.close === 'true') closeRenameModal();
+});
+
+submitManyBtn.addEventListener('click', () => {
+  const hasFiles = state.fileStore.image.length > 0 || state.fileStore.coord.length > 0;
+  if (!hasFiles) {
+    alert('Загрузите хотя бы один файл для отправки.');
+    return;
+  }
+  alert('Файлы готовы к отправке.');
 });
 
 renderFileList('image');
