@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Множественная идентификация</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="many-page">
+    <div class="workbench">
+      <button class="back-link" id="backHomeBtn" type="button">← Назад</button>
+      <div class="page-header">
+        <h1>Множественная идентификация</h1>
+      </div>
+
+      <p class="subtitle-panel">
+        Загрузите набор изображений и координаты ограничивающие контур машины. Учтите, что название изображения и текстового файла должны совпадать.
+      </p>
+
+      <div class="multi-panel">
+        <div class="file-panel">
+          <h3>Изображения:</h3>
+          <div id="imageList" class="file-list"></div>
+          <button class="add-file-btn" type="button" data-type="image">Добавить</button>
+        </div>
+
+        <div class="file-panel">
+          <h3>Координаты:</h3>
+          <div id="coordList" class="file-list"></div>
+          <button class="add-file-btn" type="button" data-type="coord">Добавить</button>
+        </div>
+      </div>
+
+      <div class="multi-footer">
+        <button class="action-btn" id="submitManyBtn" type="button">Отправить!</button>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="renameModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="true"></div>
+      <div class="modal-dialog" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h2>Переименование файла</h2>
+          <button class="close-btn" id="renameCloseBtn" aria-label="Закрыть">×</button>
+        </div>
+        <div class="modal-form">
+          <label>
+            Имя
+            <input id="renameInput" type="text" />
+          </label>
+          <div class="extension-row">
+            <span>Расширение:</span>
+            <div class="extension-menu">
+              <button class="extension-trigger" id="extensionTrigger" type="button">png</button>
+              <div class="extension-options" id="extensionOptions"></div>
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button class="ghost-btn" id="cancelRenameBtn" type="button">Отменить</button>
+            <button class="action-btn" id="saveRenameBtn" type="button">Сохранить</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="previewModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="true"></div>
+      <div class="preview-modal-content" id="previewContent"></div>
+    </div>
+
+    <script src="/static/many.js"></script>
+  </body>
+</html>

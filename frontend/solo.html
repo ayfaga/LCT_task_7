@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Одиночная идентификация</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="solo-page">
+    <div class="workbench">
+      <button class="back-link" id="backHomeBtn" type="button">← Назад</button>
+      <div class="page-header">
+        <h1>Одиночная идентификация</h1>
+      </div>
+
+      <div class="upload-box" id="uploadBox">
+        <label class="primary-btn small" for="soloImageInput">Загрузить изображение</label>
+        <input id="soloImageInput" class="file-input" type="file" accept="image/*" />
+      </div>
+
+      <div class="stage hidden" id="stage">
+        <div class="stage-topbar">
+          <div class="instruction" id="instructionText">Отметьте нажатием контур машины</div>
+          <div class="tool-row">
+            <button class="secondary-btn square" id="undoBtn" type="button" aria-label="Отменить" title="Отменить">↶</button>
+            <button class="secondary-btn square" id="redoBtn" type="button" aria-label="Вернуть" title="Вернуть">↷</button>
+          </div>
+        </div>
+
+        <div class="image-frame">
+          <svg id="drawingCanvas" class="drawing-svg" viewBox="0 0 900 620" preserveAspectRatio="xMidYMid meet"></svg>
+        </div>
+
+        <div class="error-message" id="errorMessage">Некорректное выделение границы. Попробуйте еще раз, пожалуйста</div>
+
+        <div class="action-bar">
+          <button class="action-btn" id="analyzeBtn" type="button">Проанализировать!</button>
+          <button class="ghost-btn" id="replaceImageBtn" type="button">Загрузить другое</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/solo.js"></script>
+  </body>
+</html>
