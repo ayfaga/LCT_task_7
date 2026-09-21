@@ -9,10 +9,13 @@ const backHomeBtn = document.getElementById('backHomeBtn');
 const replaceImageBtn = document.getElementById('replaceImageBtn');
 const analyzeBtn = document.getElementById('analyzeBtn');
 
+const MAX_POINTS = 4;
+
 let imageUrl = '';
 let points = [];
 let redoStack = [];
 let activeImage = null;
+let dragIndex = null;
 
 function clearError() {
   errorMessage.classList.remove('visible');
@@ -133,70 +136,61 @@ function segmentsIntersect(a, b, c, d) {
   return false;
 }
 
-function isPolygonValid() {
-  if (points.length < 3) return false;
+function isPolygonValid(candidatePoints = points) {
+  if (candidatePoints.length < 3) return false;
 
-  for (let i = 0; i < points.length; i += 1) {
-    const a = points[i];
-    const b = points[(i + 1) % points.length];
+  for (let i = 0; i < candidatePoints.length; i += 1) {
+    const a = candidatePoints[i];
+    const b = candidatePoints[(i + 1) % candidatePoints.length];
 
-    for (let j = i + 1; j < points.length; j += 1) {
-      if (j === i || j === (i + 1) % points.length || (i === 0 && j === points.length - 1)) continue;
-      const c = points[j];
-      const d = points[(j + 1) % points.length];
+    for (let j = i + 1; j < candidatePoints.length; j += 1) {
+      if (j === i || j === (i + 1) % candidatePoints.length || (i === 0 && j === candidatePoints.length - 1)) continue;
+      const c = candidatePoints[j];
+      const d = candidatePoints[(j + 1) % candidatePoints.length];
       if (segmentsIntersect(a, b, c, d)) {
         return false;
       }
     }
   }
 
-  const area = points.reduce((sum, point, index) => {
-    const next = points[(index + 1) % points.length];
+  const area = candidatePoints.reduce((sum, point, index) => {
+    const next = candidatePoints[(index + 1) % candidatePoints.length];
     return sum + (point.x * next.y - next.x * point.y);
   }, 0);
 
   return Math.abs(area) > 0.1;
 }
 
-function addPoint(event) {
-  if (!imageUrl) return;
-  const point = getSvgPoint(event);
+function addPointAt(point) {
+  if (!imageUrl || points.length >= MAX_POINTS) {
+    if (points.length >= MAX_POINTS) {
+      errorMessage.textContent = 'Максимум 4 точки для выделения.';
+      errorMessage.classList.add('visible');
+    }
+    return;
+  }
+
   const last = points[points.length - 1];
   if (last && Math.hypot(point.x - last.x, point.y - last.y) < 8) return;
 
   const nextPoints = [...points, point];
-  if (nextPoints.length >= 4) {
-    const tempPoints = [...nextPoints];
-    const n = tempPoints.length;
-    for (let i = 0; i < n; i += 1) {
-      const a = tempPoints[i];
-      const b = tempPoints[(i + 1) % n];
-      for (let j = i + 1; j < n; j += 1) {
-        if (j === i || j === (i + 1) % n || (i === 0 && j === n - 1)) continue;
-        const c = tempPoints[j];
-        const d = tempPoints[(j + 1) % n];
-        if (segmentsIntersect(a, b, c, d)) {
-          errorMessage.classList.add('visible');
-          return;
-        }
-      }
-    }
+  if (nextPoints.length >= 3 && !isPolygonValid(nextPoints)) {
+    errorMessage.textContent = 'Некорректное выделение границы. Попробуйте еще раз, пожалуйста';
+    errorMessage.classList.add('visible');
+    return;
   }
 
   points.push(point);
   redoStack = [];
-  updateButtons();
-
-  if (points.length >= 3 && !isPolygonValid()) {
-    points.pop();
-    errorMessage.classList.add('visible');
-    redoStack = [];
-    updateButtons();
-    return;
-  }
-
   clearError();
   renderPoints();
+  updateButtons();
+}
+
+function addPoint(event) {
+  if (!imageUrl) return;
+  const point = getSvgPoint(event);
+  addPointAt(point);
 }
 
 function undoLastPoint() {
@@ -213,6 +207,43 @@ function redoLastPoint() {
   clearError();
   renderPoints();
   updateButtons();
+}
+
+function handlePointerDown(event) {
+  if (!imageUrl) return;
+
+  const point = getSvgPoint(event);
+  const hitIndex = points.findIndex((item) => Math.hypot(item.x - point.x, item.y - point.y) <= 16);
+
+  if (hitIndex !== -1) {
+    dragIndex = hitIndex;
+    drawingCanvas.setPointerCapture?.(event.pointerId);
+    return;
+  }
+
+  addPointAt(point);
+}
+
+function handlePointerMove(event) {
+  if (dragIndex === null || !imageUrl) return;
+
+  const nextPoint = getSvgPoint(event);
+  const previousPoints = [...points];
+  points[dragIndex] = nextPoint;
+
+  if (points.length >= 3 && !isPolygonValid()) {
+    points = previousPoints;
+    errorMessage.textContent = 'Некорректное выделение границы. Попробуйте еще раз, пожалуйста';
+    errorMessage.classList.add('visible');
+    return;
+  }
+
+  clearError();
+  renderPoints();
+}
+
+function handlePointerUp() {
+  dragIndex = null;
 }
 
 soloImageInput.addEventListener('change', (event) => {
@@ -239,5 +270,8 @@ analyzeBtn.addEventListener('click', () => {
 
 undoBtn.addEventListener('click', undoLastPoint);
 redoBtn.addEventListener('click', redoLastPoint);
-drawingCanvas.addEventListener('click', addPoint);
+drawingCanvas.addEventListener('pointerdown', handlePointerDown);
+drawingCanvas.addEventListener('pointermove', handlePointerMove);
+drawingCanvas.addEventListener('pointerup', handlePointerUp);
+drawingCanvas.addEventListener('pointerleave', handlePointerUp);
 updateButtons();

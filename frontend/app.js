@@ -74,7 +74,7 @@ function handleChoice(mode) {
   closeModal();
 
   const targetRoute = mode === 'solo' ? '/solo' : '/many';
-  window.open(targetRoute, '_blank');
+  window.location.assign(targetRoute);
 }
 
 startBtn.addEventListener('click', openModal);

@@ -2,7 +2,20 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+class BBox(BaseModel):
+    x: int = Field(..., ge=0)
+    y: int = Field(..., ge=0)
+    w: int = Field(..., gt=0)
+    h: int = Field(..., gt=0)
+
+    @model_validator(mode="after")
+    def validate_bbox(self):
+        if self.w <= 0 or self.h <= 0:
+            raise ValueError("BBox width and height must be positive")
+        return self
 
 
 class IdentificationRequestCreate(BaseModel):
@@ -39,3 +52,24 @@ class IdentificationRequestProcess(BaseModel):
     result: str
     confidence: float
     image_name: str | None = None
+
+
+class EmbeddingCandidate(BaseModel):
+    gallery_id: str
+    similarity: float
+
+
+class EmbeddingResponse(BaseModel):
+    model_version: str
+    dimension: int
+    embedding: list[float]
+
+
+class SearchResponse(BaseModel):
+    status: str
+    candidates: list[EmbeddingCandidate] = []
+    ranked: list[EmbeddingCandidate] = []
+    accepted: list[EmbeddingCandidate] = []
+    threshold: float = 0.422
+    confidence_semantics: str = "raw cosine, not probability"
+    model_version: str
