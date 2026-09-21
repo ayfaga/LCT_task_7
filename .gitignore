@@ -1,0 +1,44 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python packaging
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local databases / generated data
+*.sqlite3
+*.db
+
+# Project-specific runtime artifacts
+frontend/uploads/
+backend/.pytest_cache/
+.pytest_cache/
+
+# Logs
+*.log
