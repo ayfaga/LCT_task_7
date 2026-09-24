@@ -1,0 +1,6 @@
+# Optional Linux/NVIDIA deployment override. Not exercised on macOS Docker.
+services:
+  ml:
+    gpus: all
+    environment:
+      LCT_ML_DEVICE: cuda

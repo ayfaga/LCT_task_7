@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from threading import Lock
 
 import numpy as np
 from PIL import Image
@@ -34,6 +35,9 @@ class MLRuntime:
         if file_sha256(policy_file) != calibration_manifest["policy_sha256"]:
             raise ValueError("Portable policy SHA256 mismatch")
         self.policy = HybridBoostingPolicy.load(policy_file, self.model_version)
+        # A single worker may receive several requests in FastAPI's threadpool.
+        # Serializing large ViT forwards bounds activation memory on CPU/GPU.
+        self._inference_lock = Lock()
         self.encoder = E2Encoder(
             artifact_dir / model_manifest["model_file"],
             model_manifest["model_sha256"], device=device,
@@ -65,7 +69,8 @@ class MLRuntime:
         return self.gallery_embeddings is not None
 
     def embed(self, image: Image.Image, bbox: tuple[int, int, int, int]) -> np.ndarray:
-        return self.encoder.embed_image(image, bbox)
+        with self._inference_lock:
+            return self.encoder.embed_image(image, bbox)
 
     def search(self, query: np.ndarray, topk: int = 10) -> dict:
         if not self.search_ready:
@@ -86,7 +91,9 @@ class MLRuntime:
         internal = order[:10]
         accepted = self.policy.accepted(similarities[internal][None, :])[0]
         visible = order[:topk]
-        ranked = [{"gallery_id": str(self.gallery_ids[index]), "similarity": float(similarities[index])}
+        ranked = [{"gallery_id": str(self.gallery_ids[index]),
+                   "similarity": float(similarities[index]),
+                   "confidence": float(similarities[index])}
                   for index in visible]
         accepted_ids = set(self.gallery_ids[internal[accepted]])
         visible_accepted = [candidate for candidate in ranked if candidate["gallery_id"] in accepted_ids]

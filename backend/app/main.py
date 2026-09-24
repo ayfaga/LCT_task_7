@@ -1,25 +1,24 @@
 from __future__ import annotations
 
 import io
-import logging
 import os
-from functools import lru_cache
+from pathlib import Path
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from PIL import Image
-from sqlalchemy import select
+from PIL import Image, UnidentifiedImageError
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .database import Base, engine, get_db
+from .ml_gateway import MAX_IMAGE_BYTES, call_ml, get_ml_ready
 from .models import IdentificationRequest
 from .schemas import (
-    BBox,
     IdentificationRequestCreate,
-    IdentificationRequestProcess,
     IdentificationRequestRead,
     IdentificationRequestUpdate,
     EmbeddingResponse,
@@ -32,7 +31,7 @@ app = FastAPI(title="LCT Case API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -49,56 +48,18 @@ async def disable_cache(request: Request, call_next):
 
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "frontend")
+UPLOAD_DIR = Path(os.getenv("LCT_UPLOAD_DIR", os.path.join(STATIC_DIR, "uploads"))).resolve()
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-logger = logging.getLogger(__name__)
-
-
-def _read_image_bytes(file: UploadFile) -> bytes:
-    if not file or not file.filename:
+async def _upload_bytes(image: UploadFile) -> bytes:
+    if not image.filename:
         raise HTTPException(status_code=422, detail="Image file is required")
-
-    data = file.file.read()
+    data = await image.read(MAX_IMAGE_BYTES + 1)
+    if len(data) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image file is too large")
     if not data:
         raise HTTPException(status_code=422, detail="Image file is empty")
-
-    try:
-        with Image.open(__import__('io').BytesIO(data)) as image:
-            image.verify()
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail="Invalid image file") from exc
-
     return data
-
-
-def _bbox_from_form(x: int = Form(...), y: int = Form(...), w: int = Form(...), h: int = Form(...)) -> BBox:
-    try:
-        return BBox(x=x, y=y, w=w, h=h)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@lru_cache(maxsize=1)
-def _load_ml_runtime(artifact_dir: str, gallery_path: str, device: str):
-    from .ml.runtime import MLRuntime
-    return MLRuntime(artifact_dir, gallery_path or None, device)
-
-
-def _get_ml_runtime(require_gallery: bool = False):
-    artifact_dir = os.getenv("LCT_ML_ARTIFACT_DIR", "")
-    if not artifact_dir:
-        raise HTTPException(status_code=503, detail="ML artifact directory is not configured")
-    try:
-        runtime = _load_ml_runtime(
-            artifact_dir, os.getenv("LCT_ML_GALLERY_PATH", ""),
-            os.getenv("LCT_ML_DEVICE", "auto"),
-        )
-    except Exception as exc:
-        logger.exception("ML runtime could not be loaded")
-        raise HTTPException(status_code=503, detail="ML runtime is not ready") from exc
-    if require_gallery and not runtime.search_ready:
-        raise HTTPException(status_code=503, detail="ML gallery is not configured")
-    return runtime
 
 
 @app.get("/")
@@ -122,13 +83,15 @@ def health():
 
 
 @app.get("/ready")
-def ready():
+async def ready():
     try:
-        runtime = _get_ml_runtime(require_gallery=True)
-    except HTTPException:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        ml_state = await get_ml_ready()
+    except Exception:
         return JSONResponse(status_code=503, content={"status": "not_ready"})
-    return {"status": "ready", "model_version": runtime.model_version,
-            "embedding_dimension": runtime.encoder.dimension}
+    return {"status": "ready", **{key: ml_state[key] for key in (
+        "model_version", "preprocessing_version", "embedding_dimension", "gallery_size", "ranking")}}
 
 
 @app.get("/api/health")
@@ -137,29 +100,23 @@ def read_health():
 
 
 @app.post("/v1/embeddings", response_model=EmbeddingResponse)
-def create_embedding(
+async def create_embedding(
     image: UploadFile = File(...),
     x: int = Form(...),
     y: int = Form(...),
     w: int = Form(...),
     h: int = Form(...),
 ):
-    bbox = _bbox_from_form(x=x, y=y, w=w, h=h)
-    image_data = _read_image_bytes(image)
-    runtime = _get_ml_runtime()
-    try:
-        with Image.open(io.BytesIO(image_data)) as source:
-            embedding = runtime.embed(source, (bbox.x, bbox.y, bbox.w, bbox.h))
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"model_version": runtime.model_version,
-            "preprocessing_version": runtime.preprocessing_version,
-            "dimension": runtime.encoder.dimension,
-            "embedding": embedding.tolist()}
+    return await call_ml(
+        "/v1/embeddings", await _upload_bytes(image), image.filename,
+        image.content_type, {"x": x, "y": y, "w": w, "h": h},
+    )
 
 
 @app.post("/v1/search", response_model=SearchResponse)
-def search_matches(
+@app.post("/api/identify", response_model=SearchResponse)
+@app.post("/api/infer", response_model=SearchResponse)
+async def search_matches(
     image: UploadFile = File(...),
     x: int = Form(...),
     y: int = Form(...),
@@ -167,17 +124,12 @@ def search_matches(
     h: int = Form(...),
     topk: int = Form(default=10),
 ):
-    bbox = _bbox_from_form(x=x, y=y, w=w, h=h)
     if not 1 <= topk <= 100:
         raise HTTPException(status_code=422, detail="topk must be between 1 and 100")
-    image_data = _read_image_bytes(image)
-    runtime = _get_ml_runtime(require_gallery=True)
-    try:
-        with Image.open(io.BytesIO(image_data)) as source:
-            embedding = runtime.embed(source, (bbox.x, bbox.y, bbox.w, bbox.h))
-        return runtime.search(embedding, topk=topk)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await call_ml(
+        "/v1/search", await _upload_bytes(image), image.filename,
+        image.content_type, {"x": x, "y": y, "w": w, "h": h, "topk": topk},
+    )
 
 
 @app.post("/api/requests", response_model=IdentificationRequestRead, status_code=status.HTTP_201_CREATED)
@@ -240,15 +192,23 @@ def upload_image(
     db: Annotated[Session, Depends(get_db)] = None,
 ):
     if not file.filename:
-        raise HTTPException(status_code=400, detail="Filename is required")
-
-    file_ext = os.path.splitext(file.filename)[1]
-    safe_name = f"{mode}_{len(os.listdir(STATIC_DIR))}_{file.filename if file.filename else 'upload'}{file_ext}"
-    path = os.path.join(STATIC_DIR, "uploads", safe_name)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-
-    with open(path, "wb") as upload_file:
-        upload_file.write(file.file.read())
+        raise HTTPException(status_code=422, detail="Filename is required")
+    extension = Path(file.filename).suffix.lower()
+    if extension not in {".jpg", ".jpeg", ".png"}:
+        raise HTTPException(status_code=422, detail="Only JPEG and PNG are supported")
+    payload = file.file.read(MAX_IMAGE_BYTES + 1)
+    if len(payload) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image file is too large")
+    try:
+        with Image.open(io.BytesIO(payload)) as source:
+            if source.format not in {"JPEG", "PNG"} or source.width * source.height > 50_000_000:
+                raise ValueError("Unsupported image")
+            source.verify()
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid image file") from exc
+    safe_name = f"{uuid4().hex}{extension}"
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    (UPLOAD_DIR / safe_name).write_bytes(payload)
 
     item = IdentificationRequest(
         title=title or ("Solo identification" if mode == "solo" else "Multi identification"),
@@ -262,14 +222,13 @@ def upload_image(
     return item
 
 
-@app.post("/api/infer", response_model=IdentificationRequestProcess)
-def run_inference(payload: IdentificationRequestProcess):
-    return payload
-
-
 @app.get("/api/images/{filename}")
 def get_image(filename: str):
-    image_path = os.path.join(STATIC_DIR, "images", filename)
-    if not os.path.exists(image_path):
+    if Path(filename).name != filename or filename in {".", ".."}:
+        raise HTTPException(status_code=404, detail="Image not found")
+    uploaded = UPLOAD_DIR / filename
+    bundled = Path(STATIC_DIR) / "images" / filename
+    image_path = uploaded if uploaded.is_file() else bundled
+    if not image_path.is_file():
         raise HTTPException(status_code=404, detail="Image not found")
     return FileResponse(image_path)

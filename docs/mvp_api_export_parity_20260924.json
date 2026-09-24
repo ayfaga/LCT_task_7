@@ -1,0 +1,45 @@
+{
+  "status": "passed",
+  "compared_queries": 6,
+  "ordinary_queries": 3,
+  "refusal_queries": 3,
+  "observations": [
+    {
+      "query_id": "486dd80d22f94a5496b3e670b19399a7",
+      "top10_equal": true,
+      "accepted_equal": true,
+      "refused": false
+    },
+    {
+      "query_id": "7b7e0d3f38a3435a83b8d6fb5aba99ba",
+      "top10_equal": true,
+      "accepted_equal": true,
+      "refused": false
+    },
+    {
+      "query_id": "8ba5ddc596414a9695e18a68ace669d5",
+      "top10_equal": true,
+      "accepted_equal": true,
+      "refused": true
+    },
+    {
+      "query_id": "3c7adf3c0f6a48ddae27f1be8bf94c98",
+      "top10_equal": true,
+      "accepted_equal": true,
+      "refused": false
+    },
+    {
+      "query_id": "0d39327b000c4d44854a7870268edacc",
+      "top10_equal": true,
+      "accepted_equal": true,
+      "refused": true
+    },
+    {
+      "query_id": "c0ff951246c54333b756315834f32971",
+      "top10_equal": true,
+      "accepted_equal": true,
+      "refused": true
+    }
+  ],
+  "note": "API-vs-existing-unlabeled-export parity; not a labeled quality metric."
+}

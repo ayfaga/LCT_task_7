@@ -5,3 +5,8 @@ __pycache__/
 .env
 .git/
 .venv/
+local.db
+*.sqlite
+*.sqlite3
+.pytest_cache/
+tests/

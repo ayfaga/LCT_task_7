@@ -1,0 +1,56 @@
+{
+  "status": "passed",
+  "cases": 10,
+  "observations": [
+    {
+      "case": "jpeg",
+      "status": 200,
+      "expected": 200
+    },
+    {
+      "case": "negative_bbox",
+      "status": 422,
+      "expected": 422
+    },
+    {
+      "case": "bbox_outside_image",
+      "status": 422,
+      "expected": 422
+    },
+    {
+      "case": "zero_width",
+      "status": 422,
+      "expected": 422
+    },
+    {
+      "case": "topk_zero",
+      "status": 422,
+      "expected": 422
+    },
+    {
+      "case": "topk_101",
+      "status": 422,
+      "expected": 422
+    },
+    {
+      "case": "corrupt_image",
+      "status": 422,
+      "expected": 422
+    },
+    {
+      "case": "empty_image",
+      "status": 422,
+      "expected": 422
+    },
+    {
+      "case": "unsupported_bmp",
+      "status": 422,
+      "expected": 422
+    },
+    {
+      "case": "too_large",
+      "status": 413,
+      "expected": 413
+    }
+  ]
+}

@@ -57,6 +57,7 @@ class IdentificationRequestProcess(BaseModel):
 class EmbeddingCandidate(BaseModel):
     gallery_id: str
     similarity: float
+    confidence: float
 
 
 class EmbeddingResponse(BaseModel):

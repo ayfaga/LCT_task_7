@@ -1,0 +1,33 @@
+{
+  "status": "passed",
+  "model_version": "dinov2-l14-l336-fresh16-best13-20260923",
+  "gallery_size": 750,
+  "host_test_scope": "local Docker Desktop, CPU, 750 gallery",
+  "requests": {
+    "warmup": 2,
+    "sequential": 10,
+    "concurrent": 12,
+    "workers": 3,
+    "failures": 0
+  },
+  "sequential_seconds": {
+    "median": 1.4096513130061794,
+    "p95": 1.455350995771005,
+    "max": 1.455399332975503
+  },
+  "concurrent_seconds": {
+    "median": 4.4978826669976115,
+    "p95": 4.6598407580109775,
+    "max": 4.681649082980584,
+    "wall": 18.02191595797194,
+    "completed_requests_per_second": 0.665855951608288
+  },
+  "openapi_paths_checked": [
+    "/api/identify",
+    "/api/infer",
+    "/v1/search",
+    "/v1/embeddings"
+  ],
+  "invalid_bbox_http": 422,
+  "note": "Repeated same-image API load check. Not organizer hardware, batch FPS, or hidden quality."
+}

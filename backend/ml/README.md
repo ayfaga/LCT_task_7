@@ -1,5 +1,10 @@
 # E2 Vehicle ReID ML integration
 
+**Prototype status:** this is the current E2+hybrid implementation. The team
+plans a later full-data training run; any new encoder needs a new model bundle,
+gallery and refusal calibration. The runnable two-service setup and backend
+handoff are in the repository root `README.md` and `docs/BACKEND_HANDOFF.md`.
+
 This directory is the ML-owned adapter in the backend repository. It does not
 contain model weights, organizer images, or secrets. Product UI, persistence,
 deployment operations, and a million-object index remain backend-owned.
@@ -25,16 +30,18 @@ not the original A100-signed bundle.
 
 ## Runtime
 
-Install `backend/requirements.txt` and `backend/requirements-ml.txt` in a
-Python 3.12 environment. From the `LCT_task_7` checkout, set these
-environment variables **before** startup:
+The preferred prototype starts two isolated containers with
+`docker compose up --build -d` from the repository root. The backend calls
+`app.ml.api` over HTTP and does not load PyTorch. For direct ML-service
+debugging, install `backend/requirements.txt` and `backend/requirements-ml.txt`
+in a Python 3.12 environment, set these variables, and start its own app:
 
 ```sh
 export LCT_ML_ARTIFACT_DIR=/absolute/path/to/final_e2_hybrid
 export LCT_ML_GALLERY_PATH=/absolute/path/to/compatible_gallery.npz
 export LCT_ML_DEVICE=auto
 cd backend
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+python -m uvicorn app.ml.api:app --host 127.0.0.1 --port 8001 --workers 1
 ```
 
 The gallery NPZ must carry matching model version/SHA, unique IDs and L2
@@ -93,8 +100,8 @@ python LCT_task_7/backend/ml/export_test_hybrid.py \
   --output data/derived/final_e2_hybrid/test_export
 ```
 
-Restart the API after replacing a gallery or bundle; its runtime is cached
-per process. A mere file overwrite does not constitute a versioned switch.
+Restart the ML container after replacing a gallery or bundle; its runtime is
+cached per process. A mere file overwrite does not constitute a versioned switch.
 
 ## Measured evidence and limitations
 
