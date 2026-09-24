@@ -74,6 +74,7 @@ class SearchResponse(BaseModel):
 
     status: str
     model_version: str
+    gallery_id: str | None = None
     ranked: list[EmbeddingCandidate]
     accepted: list[EmbeddingCandidate]
     candidates: list[EmbeddingCandidate]

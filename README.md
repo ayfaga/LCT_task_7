@@ -30,4 +30,25 @@ curl -F image=@/path/to/car.png -F x=0 -F y=0 -F w=640 -F h=360 \
 
 `/api/identify`, `/api/infer` and `/v1/search` return the same search schema. `ranked` contains the cosine top-10; `accepted` (also exposed as `candidates` for compatibility) is the subset kept by the hybrid refusal policy. `status=no_confident_match` with `accepted=[]` is a successful empty answer. The candidate fields `similarity` and `confidence` are both raw cosine, **not** a calibrated probability. `/v1/embeddings` returns the normalized 1024D vector. `/health` checks the backend process; `/ready` checks database, ML artifacts and gallery.
 
+## Upload a separate gallery
+
+The public backend accepts JPEG/PNG files, a folder sent as individual multipart files, or a ZIP. A gallery can be extended in several imports. Original images and versioned embedding archives live in the persistent `gallery_state` Docker volume; they are not included in Git or the image. Uploading requires no changes to the default 750-image gallery.
+
+```sh
+curl -F 'name=My gallery' http://127.0.0.1:18000/api/galleries
+# Copy gallery_id from the response:
+curl -F images=@/path/to/car1.jpg -F images=@/path/to/car2.png \
+  http://127.0.0.1:18000/api/galleries/GALLERY_ID/images
+# Or use one ZIP (can contain manifest.csv at its root):
+curl -F archive=@/path/to/cars.zip \
+  http://127.0.0.1:18000/api/galleries/GALLERY_ID/images
+curl http://127.0.0.1:18000/api/galleries/GALLERY_ID
+curl -F image=@/path/to/query.jpg -F x=0 -F y=0 -F w=640 -F h=360 \
+  -F gallery_id=GALLERY_ID http://127.0.0.1:18000/api/identify
+```
+
+`POST /api/galleries/{id}/images` returns 202; poll `GET /api/galleries/{id}` until `state=ready` (or `collecting` if fewer than ten images). Search requires at least ten processed images because the fixed refusal policy uses cosine top-10. `GET /api/galleries` lists galleries, `GET /api/galleries/{id}/images/{image_key}` previews a stored image, and `POST /api/galleries/{id}/retry` retries a failed import. Each upload is limited to 200 images and 200 MiB total; an individual image is limited to 20 MiB and a ZIP to 100 MiB compressed. A gallery holds at most 1000 images.
+
+Without a manifest, each image is treated as an already cropped vehicle and its filename stem becomes its ID. For full frames, send a CSV as the `manifest` field or put `manifest.csv` at the ZIP root. Columns: `filename,gallery_id,x,y,w,h`; `filename` matches the multipart filename or path inside ZIP, and BBox coordinates refer to the original image. Empty BBox means the whole image. Keep gallery IDs unique within a gallery. A private local test page can be served separately from the research workspace; no test UI is packaged in this Git repository.
+
 Architecture, version contract and handoff details: [backend handoff](docs/BACKEND_HANDOFF.md) and [ML package guide](backend/ml/README.md).

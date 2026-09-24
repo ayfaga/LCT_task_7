@@ -10,15 +10,20 @@ from threading import Lock
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from PIL import Image, UnidentifiedImageError
+from pydantic import BaseModel
 
 from app.schemas import BBox, EmbeddingResponse, SearchResponse
 
-from .runtime import MLRuntime
+from .runtime import GalleryNotReady, MLRuntime
 
 
 logger = logging.getLogger(__name__)
 app = FastAPI(title="LCT Vehicle ReID ML", version="1.0.0")
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
+
+
+class GalleryBuildRequest(BaseModel):
+    job_id: str
 
 
 _runtime_lock = Lock()
@@ -139,13 +144,32 @@ def search(
     x: int = Form(...), y: int = Form(...),
     w: int = Form(...), h: int = Form(...),
     topk: int = Form(10),
+    gallery_id: str | None = Form(None),
 ):
     if not 1 <= topk <= 100:
         raise HTTPException(status_code=422, detail="topk must be between 1 and 100")
     bbox = _bbox(x, y, w, h)
     source = _decode_image(_image_bytes(image))
-    runtime = _runtime(require_gallery=True)
+    runtime = _runtime(require_gallery=gallery_id is None)
     try:
-        return runtime.search(runtime.embed(source, bbox), topk=topk)
+        vector = runtime.embed(source, bbox)
+        if gallery_id is None:
+            return runtime.search(vector, topk=topk)
+        return runtime.search(vector, topk=topk, gallery_id=gallery_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Gallery not found") from exc
+    except GalleryNotReady as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/internal/galleries/{gallery_id}/build")
+def build_gallery(gallery_id: str, payload: GalleryBuildRequest):
+    runtime = _runtime()
+    try:
+        return runtime.build_gallery(gallery_id, payload.job_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Gallery not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

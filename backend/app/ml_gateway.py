@@ -27,7 +27,7 @@ async def get_ml_ready() -> dict:
 
 
 async def call_ml(path: str, data: bytes, filename: str, content_type: str | None,
-                  form: dict[str, int]) -> dict:
+                  form: dict[str, int | str]) -> dict:
     if not filename or not data:
         raise HTTPException(status_code=422, detail="Image file is required")
     if len(data) > MAX_IMAGE_BYTES:
@@ -53,3 +53,12 @@ async def call_ml(path: str, data: bytes, filename: str, content_type: str | Non
         return response.json()
     except ValueError as exc:
         raise HTTPException(status_code=502, detail="Invalid ML service response") from exc
+
+
+async def build_ml_gallery(gallery_id: str, job_id: str) -> dict:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(3600.0, connect=3.0)) as client:
+        response = await client.post(
+            f"{ml_url()}/internal/galleries/{gallery_id}/build", json={"job_id": job_id},
+        )
+    response.raise_for_status()
+    return response.json()

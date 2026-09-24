@@ -5,6 +5,7 @@
 - `backend/app/ml/` owns preprocessing, strict DINOv2 E2 loading, exact cosine search and the portable hybrid refusal policy. `app.ml.api` runs it as a separate one-worker HTTP service on port 8001.
 - `backend/app/ml_gateway.py` is the backend's only ML client. `app.main` exposes the public `/api/identify` and compatible `/api/infer`, `/v1/search`, `/v1/embeddings` routes. The backend does not import Torch or load weights.
 - `docker-compose.yml` runs the backend and ML service separately. SQLite stores the existing request metadata and validated uploads in a Docker volume. The prototype gallery is a read-only, version-checked NPZ. For a production million-object gallery the backend team owns a persistent vector index and benchmark; this prototype does not claim it.
+- `backend/app/gallery_store.py` owns the user-uploaded gallery API state and image validation. Both containers mount the persistent `gallery_state` volume; the backend writes originals and metadata, and the ML service writes versioned NPZ embedding archives. The default gallery remains mounted read-only.
 
 ## ML contract
 
@@ -13,6 +14,8 @@ Request: multipart `image` (JPEG/PNG), `x,y,w,h` integer BBox in pixels of the s
 `topk` can be 1…100 for inspection; the refusal policy always runs on the internal cosine top-10. For the competition export, use exactly 10. The optional research k-reciprocal reranker is **not** part of this prototype because its scoring and refusal interaction are still unverified.
 
 The 1,217,580,060-byte `model_inference.pt` must have SHA256 `dc910395dda9dc735b1d5571ef7baf75b767964500b6d0a23edeb7cde4d33c52`. The portable policy and preprocessing SHA are checked against their manifests at ML startup; the gallery records model version and weight SHA. After later full-data training, create a *new* artifact directory and gallery, recalibrate refusal, rerun tests and switch volumes/version together. Do not overwrite this prototype's files in place.
+
+The public custom gallery routes are `POST /api/galleries` (form `name`), `GET /api/galleries`, `GET /api/galleries/{id}`, `POST /api/galleries/{id}/images` (multipart `images` repeated, or `archive` ZIP; optional `manifest` CSV), `POST /api/galleries/{id}/retry`, and `GET /api/galleries/{id}/images/{image_key}`. The search routes accept optional `gallery_id`. The import route returns 202 and runs the existing encoder in the ML service; poll state and progress via GET. The backend-to-ML build endpoint is `/internal/galleries/{id}/build` and is intended only for the private Compose network. The gallery metadata points to a completed NPZ generation atomically, so searching can continue against the previous generation while new images build. Ten processed gallery images are required by the top-10 refusal policy. The implementation targets manual inspection up to 1000 images, not production indexing, access control, or arbitrary public uploads.
 
 ## Acceptance for backend team
 

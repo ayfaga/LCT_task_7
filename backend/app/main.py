@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import io
+import logging
 import os
 from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -15,7 +16,11 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .database import Base, engine, get_db
-from .ml_gateway import MAX_IMAGE_BYTES, call_ml, get_ml_ready
+from .gallery_store import (
+    create_gallery, fail_import, gallery_dir, list_galleries, public_gallery,
+    read_gallery, retry_import, stage_import,
+)
+from .ml_gateway import MAX_IMAGE_BYTES, build_ml_gallery, call_ml, get_ml_ready
 from .models import IdentificationRequest
 from .schemas import (
     IdentificationRequestCreate,
@@ -27,6 +32,7 @@ from .schemas import (
 
 Base.metadata.create_all(bind=engine)
 app = FastAPI(title="LCT Case API", version="1.0.0")
+logger = logging.getLogger(__name__)
 
 app.add_middleware(
     CORSMiddleware,
@@ -123,13 +129,75 @@ async def search_matches(
     w: int = Form(...),
     h: int = Form(...),
     topk: int = Form(default=10),
+    gallery_id: str | None = Form(default=None),
 ):
     if not 1 <= topk <= 100:
         raise HTTPException(status_code=422, detail="topk must be between 1 and 100")
+    if gallery_id:
+        info = public_gallery(read_gallery(gallery_id))
+        if not info["search_ready"]:
+            raise HTTPException(status_code=409, detail="Add at least ten gallery images before searching")
+    form = {"x": x, "y": y, "w": w, "h": h, "topk": topk}
+    if gallery_id:
+        form["gallery_id"] = gallery_id
     return await call_ml(
         "/v1/search", await _upload_bytes(image), image.filename,
-        image.content_type, {"x": x, "y": y, "w": w, "h": h, "topk": topk},
+        image.content_type, form,
     )
+
+
+async def _finish_gallery_import(gallery_id: str, job_id: str) -> None:
+    try:
+        await build_ml_gallery(gallery_id, job_id)
+    except Exception as exc:
+        logger.exception("Gallery import failed: %s", gallery_id)
+        fail_import(gallery_id, job_id, f"Embedding failed: {type(exc).__name__}")
+
+
+@app.post("/api/galleries", status_code=201)
+def new_gallery(name: str = Form(...)):
+    return create_gallery(name)
+
+
+@app.get("/api/galleries")
+def galleries():
+    return list_galleries()
+
+
+@app.get("/api/galleries/{gallery_id}")
+def gallery(gallery_id: str):
+    return public_gallery(read_gallery(gallery_id))
+
+
+@app.post("/api/galleries/{gallery_id}/images", status_code=202)
+async def import_gallery_images(
+    gallery_id: str,
+    background_tasks: BackgroundTasks,
+    images: list[UploadFile] = File(default=[]),
+    archive: UploadFile | None = File(None),
+    manifest: UploadFile | None = File(None),
+):
+    result = await stage_import(gallery_id, images, archive, manifest)
+    background_tasks.add_task(_finish_gallery_import, gallery_id, result["job_id"])
+    return result
+
+
+@app.post("/api/galleries/{gallery_id}/retry", status_code=202)
+def retry_gallery_images(gallery_id: str, background_tasks: BackgroundTasks):
+    result = retry_import(gallery_id)
+    background_tasks.add_task(_finish_gallery_import, gallery_id, result["job_id"])
+    return result
+
+
+@app.get("/api/galleries/{gallery_id}/images/{image_key}")
+def gallery_image(gallery_id: str, image_key: str):
+    meta = read_gallery(gallery_id)
+    if not any(row["image_key"] == image_key for row in meta["images"]):
+        raise HTTPException(status_code=404, detail="Gallery image not found")
+    path = gallery_dir(gallery_id) / "images" / image_key
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Gallery image not found")
+    return FileResponse(path)
 
 
 @app.post("/api/requests", response_model=IdentificationRequestRead, status_code=status.HTTP_201_CREATED)
