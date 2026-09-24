@@ -51,4 +51,4 @@ curl -F image=@/path/to/query.jpg -F x=0 -F y=0 -F w=640 -F h=360 \
 
 Without a manifest, each image is treated as an already cropped vehicle and its filename stem becomes its ID. For full frames, send a CSV as the `manifest` field or put `manifest.csv` at the ZIP root. Columns: `filename,gallery_id,x,y,w,h`; `filename` matches the multipart filename or path inside ZIP, and BBox coordinates refer to the original image. Empty BBox means the whole image. Keep gallery IDs unique within a gallery. A private local test page can be served separately from the research workspace; no test UI is packaged in this Git repository.
 
-Architecture, version contract and handoff details: [backend handoff](docs/BACKEND_HANDOFF.md) and [ML package guide](backend/ml/README.md).
+Architecture, version contract and handoff details: [backend handoff](docs/BACKEND_HANDOFF.md), [backend developer guide](docs/BACKEND_DEVELOPER_GUIDE.md), and [ML package guide](backend/ml/README.md). Full criteria audit: [criteria status](docs/CRITERIA_AUDIT_20260924.md).
