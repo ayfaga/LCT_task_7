@@ -23,3 +23,5 @@ The 1,217,580,060-byte `model_inference.pt` must have SHA256 `dc910395dda9dc735b
 5. Benchmark on the organizers' hardware. Current exact NumPy gallery is intended for the supplied 750-image test gallery. Add a versioned scalable index only after measuring retrieval fidelity and end-to-end latency.
 
 The offline export remains under the outer research project's `data/derived/final_e2_hybrid/test_export/`; the service does not generate it on each request. It contains unlabeled test predictions, not an official hidden score.
+
+The later train+dev refit was evaluated once on the held-out proxy split but did not pass its predeclared promotion gate. It is not mounted by this prototype; do not reuse the current gallery or refusal thresholds with a future encoder.
