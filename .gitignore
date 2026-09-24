@@ -39,6 +39,11 @@ Thumbs.db
 frontend/uploads/
 backend/.pytest_cache/
 .pytest_cache/
+backend/ml_artifacts/
+
+# Only the minimal Apache-2.0 DINOv2 inference files are explicitly vendored.
+# The larger local source checkout (docs/notebooks/training code) is not shipped.
+backend/third_party/dinov2-main/
 
 # Logs
 *.log

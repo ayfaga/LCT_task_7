@@ -60,16 +60,21 @@ class EmbeddingCandidate(BaseModel):
 
 
 class EmbeddingResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     model_version: str
+    preprocessing_version: str
     dimension: int
     embedding: list[float]
 
 
 class SearchResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     status: str
-    candidates: list[EmbeddingCandidate] = []
-    ranked: list[EmbeddingCandidate] = []
-    accepted: list[EmbeddingCandidate] = []
-    threshold: float = 0.422
-    confidence_semantics: str = "raw cosine, not probability"
     model_version: str
+    ranked: list[EmbeddingCandidate]
+    accepted: list[EmbeddingCandidate]
+    candidates: list[EmbeddingCandidate]
+    threshold: float
+    confidence_semantics: str

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import io
+import logging
 import os
+from functools import lru_cache
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from sqlalchemy import select
@@ -15,11 +18,11 @@ from .database import Base, engine, get_db
 from .models import IdentificationRequest
 from .schemas import (
     BBox,
-    EmbeddingResponse,
     IdentificationRequestCreate,
     IdentificationRequestProcess,
     IdentificationRequestRead,
     IdentificationRequestUpdate,
+    EmbeddingResponse,
     SearchResponse,
 )
 
@@ -48,9 +51,7 @@ async def disable_cache(request: Request, call_next):
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "frontend")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-MODEL_VERSION = "reid-base-v1"
-MODEL_DIMENSION = 768
-DEFAULT_THRESHOLD = 0.422
+logger = logging.getLogger(__name__)
 
 
 def _read_image_bytes(file: UploadFile) -> bytes:
@@ -77,22 +78,27 @@ def _bbox_from_form(x: int = Form(...), y: int = Form(...), w: int = Form(...), 
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-def _mock_embedding() -> list[float]:
-    values = []
-    for index in range(MODEL_DIMENSION):
-        values.append(round(((index % 17) - 8) * 0.0123, 6))
-    return values
+@lru_cache(maxsize=1)
+def _load_ml_runtime(artifact_dir: str, gallery_path: str, device: str):
+    from .ml.runtime import MLRuntime
+    return MLRuntime(artifact_dir, gallery_path or None, device)
 
 
-def _mock_candidates(topk: int = 10) -> list[dict[str, float | str]]:
-    candidates = [
-        {"gallery_id": "car_812", "similarity": 0.74},
-        {"gallery_id": "car_401", "similarity": 0.63},
-        {"gallery_id": "car_980", "similarity": 0.52},
-    ]
-    if topk <= 0:
-        return []
-    return candidates[: max(1, min(topk, len(candidates)))]
+def _get_ml_runtime(require_gallery: bool = False):
+    artifact_dir = os.getenv("LCT_ML_ARTIFACT_DIR", "")
+    if not artifact_dir:
+        raise HTTPException(status_code=503, detail="ML artifact directory is not configured")
+    try:
+        runtime = _load_ml_runtime(
+            artifact_dir, os.getenv("LCT_ML_GALLERY_PATH", ""),
+            os.getenv("LCT_ML_DEVICE", "auto"),
+        )
+    except Exception as exc:
+        logger.exception("ML runtime could not be loaded")
+        raise HTTPException(status_code=503, detail="ML runtime is not ready") from exc
+    if require_gallery and not runtime.search_ready:
+        raise HTTPException(status_code=503, detail="ML gallery is not configured")
+    return runtime
 
 
 @app.get("/")
@@ -117,7 +123,12 @@ def health():
 
 @app.get("/ready")
 def ready():
-    return {"ready": True, "model_version": MODEL_VERSION}
+    try:
+        runtime = _get_ml_runtime(require_gallery=True)
+    except HTTPException:
+        return JSONResponse(status_code=503, content={"status": "not_ready"})
+    return {"status": "ready", "model_version": runtime.model_version,
+            "embedding_dimension": runtime.encoder.dimension}
 
 
 @app.get("/api/health")
@@ -125,7 +136,7 @@ def read_health():
     return {"status": "ok"}
 
 
-@app.post("/v1/embeddings")
+@app.post("/v1/embeddings", response_model=EmbeddingResponse)
 def create_embedding(
     image: UploadFile = File(...),
     x: int = Form(...),
@@ -134,16 +145,20 @@ def create_embedding(
     h: int = Form(...),
 ):
     bbox = _bbox_from_form(x=x, y=y, w=w, h=h)
-    _read_image_bytes(image)
+    image_data = _read_image_bytes(image)
+    runtime = _get_ml_runtime()
+    try:
+        with Image.open(io.BytesIO(image_data)) as source:
+            embedding = runtime.embed(source, (bbox.x, bbox.y, bbox.w, bbox.h))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"model_version": runtime.model_version,
+            "preprocessing_version": runtime.preprocessing_version,
+            "dimension": runtime.encoder.dimension,
+            "embedding": embedding.tolist()}
 
-    return {
-        "model_version": MODEL_VERSION,
-        "dimension": MODEL_DIMENSION,
-        "embedding": _mock_embedding(),
-    }
 
-
-@app.post("/v1/search")
+@app.post("/v1/search", response_model=SearchResponse)
 def search_matches(
     image: UploadFile = File(...),
     x: int = Form(...),
@@ -153,22 +168,16 @@ def search_matches(
     topk: int = Form(default=10),
 ):
     bbox = _bbox_from_form(x=x, y=y, w=w, h=h)
-    _read_image_bytes(image)
-
-    candidates = _mock_candidates(topk=topk)
-    confident = [
-        {"gallery_id": candidate["gallery_id"], "similarity": float(candidate["similarity"])}
-        for candidate in candidates
-        if float(candidate["similarity"]) >= DEFAULT_THRESHOLD
-    ]
-
-    status_value = "matched" if confident else "no_confident_match"
-    response = {
-        "status": status_value,
-        "candidates": confident,
-        "model_version": MODEL_VERSION,
-    }
-    return response
+    if not 1 <= topk <= 100:
+        raise HTTPException(status_code=422, detail="topk must be between 1 and 100")
+    image_data = _read_image_bytes(image)
+    runtime = _get_ml_runtime(require_gallery=True)
+    try:
+        with Image.open(io.BytesIO(image_data)) as source:
+            embedding = runtime.embed(source, (bbox.x, bbox.y, bbox.w, bbox.h))
+        return runtime.search(embedding, topk=topk)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/api/requests", response_model=IdentificationRequestRead, status_code=status.HTTP_201_CREATED)
