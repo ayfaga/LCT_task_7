@@ -1,4 +1,4 @@
-"""Versioned E2 encoder, exact cosine gallery, and selected refusal policy."""
+"""Versioned DINOv2 encoder, exact cosine gallery, and refusal policy."""
 
 from __future__ import annotations
 

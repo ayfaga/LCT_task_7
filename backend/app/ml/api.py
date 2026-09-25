@@ -1,4 +1,4 @@
-"""Standalone HTTP boundary for the versioned E2 inference bundle."""
+"""Standalone HTTP boundary for a versioned Vehicle ReID inference bundle."""
 
 from __future__ import annotations
 

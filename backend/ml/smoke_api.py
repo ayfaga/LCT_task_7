@@ -1,4 +1,4 @@
-"""Real local HTTP-contract smoke with the chosen E2 weight and gallery."""
+"""Real local ML-service HTTP-contract smoke with a versioned weight and gallery."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def main() -> None:
     os.environ["LCT_ML_GALLERY_PATH"] = str(args.gallery.resolve())
     os.environ["LCT_ML_DEVICE"] = args.device
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from app.main import app  # noqa: E402
+    from app.ml.api import app  # noqa: E402
 
     with Image.open(args.image) as image:
         width, height = image.size
@@ -46,7 +46,10 @@ def main() -> None:
         )
     if (ready.status_code != 200 or embedding_response.status_code != 200
             or search_response.status_code != 200 or invalid.status_code != 422):
-        raise AssertionError("ML HTTP status contract failed")
+        raise AssertionError({"ready": [ready.status_code, ready.text[:300]],
+                              "embedding": [embedding_response.status_code, embedding_response.text[:300]],
+                              "search": [search_response.status_code, search_response.text[:300]],
+                              "invalid": [invalid.status_code, invalid.text[:300]]})
     embedding = embedding_response.json()
     search = search_response.json()
     vector = np.asarray(embedding["embedding"], dtype=np.float32)

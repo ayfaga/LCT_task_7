@@ -1,4 +1,4 @@
-"""Strict offline loading of the final E2 inference weight."""
+"""Strict offline loading of a versioned DINOv2-L/14 inference weight."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def select_device(requested: str) -> str:
 class E2Encoder:
     def __init__(self, model_path: Path, expected_sha256: str, device: str = "auto"):
         if file_sha256(model_path) != expected_sha256:
-            raise ValueError("E2 inference weight SHA256 mismatch")
+            raise ValueError("Inference weight SHA256 mismatch")
         checkpoint = torch.load(model_path, map_location="cpu", weights_only=True)
         expected = {
             "format_version": 1,
@@ -53,7 +53,7 @@ class E2Encoder:
             "embedding_normalization": "l2_after_encoder",
         }
         if any(checkpoint.get(key) != value for key, value in expected.items()):
-            raise ValueError("Unexpected E2 checkpoint contract")
+            raise ValueError("Unexpected DINOv2 checkpoint contract")
         self.device = select_device(device)
         self.model = dinov2_vitl14(pretrained=False)
         self.model.load_state_dict(checkpoint["encoder"], strict=True)

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "bundle_version": "joint-l336-hybrid1-20260925",
+  "model_version": "dinov2-l14-l336-joint-cityflow-organizer-best19-20260925",
+  "model_file": "model_inference.pt",
+  "model_sha256": "507b4f2e34384e2366ab5364e147331831664493b35b40041507d88634da05f5",
+  "model_size_bytes": 1217580473,
+  "model_kind": "dinov2_normalized_cls",
+  "architecture": "dinov2_vitl14",
+  "input_size": 336,
+  "embedding_dimension": 1024,
+  "embedding_dtype": "float32",
+  "embedding_normalization": "l2",
+  "preprocessing_version": "organizer-bbox-rgb-max448-lanczos-pad-bicubic-imagenet-v1",
+  "preprocessing_sha256": "2e6187104dc6dfa166e50424e9ecb0314e6dce9982ba26708c00d0c32fda9287",
+  "source_training_checkpoint_sha256": "e1e3c03476d3b1af8eb9d9323b896d4e1e0859064597aaa66c79ee1b3e6e8d83",
+  "source_pretrain_sha256": "d5383ea8f4877b2472eb973e0fd72d557c7da5d3611bd527ceeb1d7162cbf428",
+  "training_data": "organizer train + AIC21 Track2 CityFlow train; no holdout"
+}

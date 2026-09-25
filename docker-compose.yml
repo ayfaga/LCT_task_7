@@ -12,8 +12,8 @@ services:
       MKL_NUM_THREADS: ${LCT_TORCH_THREADS:-4}
       LCT_ML_USER_GALLERY_DIR: /gallery_state
     volumes:
-      - ${LCT_ML_ARTIFACT_DIR:-../data/derived/final_e2_hybrid}:/model:ro
-      - ${LCT_ML_GALLERY_PATH:-../data/derived/final_e2_hybrid/test_gallery_e2.npz}:/gallery/gallery.npz:ro
+      - ${LCT_ML_ARTIFACT_DIR:-./model_artifacts/joint_l336}:/model:ro
+      - ${LCT_ML_GALLERY_PATH:-../data/derived/joint_l336_20260925/test_gallery_joint.npz}:/gallery/gallery.npz:ro
       - gallery_state:/gallery_state
     ports:
       - "127.0.0.1:${LCT_ML_PORT:-8001}:8001"

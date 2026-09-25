@@ -1,4 +1,4 @@
-"""Portable scorer for the selected E2 histogram-boosting refusal policy.
+"""Portable scorer for a versioned histogram-boosting refusal policy.
 
 The scorer consumes only sorted cosine similarities. It never reads images,
 metadata, camera IDs, licence plates, or identity labels.

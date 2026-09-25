@@ -1,15 +1,30 @@
 # LCT Vehicle ReID prototype
 
-This branch provides a backend API and an isolated ML service for the **prototype** E2 encoder and hybrid refusal policy. The model is scheduled for further training; this version and its thresholds are not the final competition model.
+**Current ML default:** joint CityFlow+organizer DINOv2-L/14@336, best epoch 19,
+with a separately recalibrated shallow5 refusal policy. The 1.218 GB model
+file in `model_artifacts/joint_l336/` is tracked by Git LFS: run `git lfs pull`
+after cloning. The 750-image test gallery is a derived local file outside
+Git; pass `LCT_ML_GALLERY_PATH` for another installation. Full version,
+checksums, measured quality and deployment gates are in
+[the joint-model handoff](docs/JOINT_L336_DEPLOYMENT_20260925.md).
+
+The older E2 artifacts remain available as a rollback by explicitly setting
+`LCT_ML_ARTIFACT_DIR=../data/derived/final_e2_hybrid` and
+`LCT_ML_GALLERY_PATH=../data/derived/final_e2_hybrid/test_gallery_e2.npz`.
+The rest of this README documents the existing API and user-gallery workflow.
+
+This branch provides a backend API and an isolated ML service for the selected
+joint encoder and hybrid refusal policy. The model remains a competition
+candidate, not a verified hidden-test winner.
 
 ## Run
 
-Place the verified E2 artifact directory and a gallery built by the **same** encoder on the host. In the parent research workspace the default paths already point to:
+Place the verified model artifact directory and a gallery built by the **same** encoder on the host. In the parent research workspace the default paths now point to:
 
-- `../data/derived/final_e2_hybrid/` — model, manifests and portable boosting policy;
-- `../data/derived/final_e2_hybrid/test_gallery_e2.npz` — 750-image test gallery.
+- `./model_artifacts/joint_l336/` — LFS weight, manifests and portable boosting policy;
+- `../data/derived/joint_l336_20260925/test_gallery_joint.npz` — 750-image test gallery.
 
-For another checkout, set `LCT_ML_ARTIFACT_DIR` and `LCT_ML_GALLERY_PATH` to absolute host paths. Weights and gallery are mounted read-only; they are never stored in Git or the container image.
+For another checkout, set `LCT_ML_ARTIFACT_DIR` and `LCT_ML_GALLERY_PATH` to absolute host paths. Weights and gallery are mounted read-only. The selected weight is stored via Git LFS, while the gallery and images are not stored in Git; neither is baked into the container image.
 
 ```sh
 LCT_BACKEND_PORT=18000 LCT_ML_PORT=18001 docker compose up --build -d

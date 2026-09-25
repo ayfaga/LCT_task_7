@@ -1,9 +1,17 @@
-# E2 Vehicle ReID ML integration
+# ML adapter: current joint L336 and historical E2
 
-**Prototype status:** this is the current E2+hybrid implementation. The team
-plans a later full-data training run; any new encoder needs a new model bundle,
-gallery and refusal calibration. The runnable two-service setup and backend
-handoff are in the repository root `README.md` and `docs/BACKEND_HANDOFF.md`.
+The **current** default bundle is the joint CityFlow+organizer L336 under
+`model_artifacts/joint_l336/` (Git LFS weight), with a newly fitted policy.
+See [`docs/JOINT_L336_DEPLOYMENT_20260925.md`](../../docs/JOINT_L336_DEPLOYMENT_20260925.md)
+for its versions, thresholds, gallery mount and checks. The E2 paths and
+numbers below are retained only as rollback instructions; do not use the
+E2 booster or gallery with the joint encoder.
+
+## Historical E2 rollback
+
+This section describes the previous E2+hybrid implementation. Its complete
+bundle, gallery and refusal calibration must stay together. The runnable
+two-service setup is in the repository root `README.md`.
 
 This directory is the ML-owned adapter in the backend repository. It does not
 contain model weights, organizer images, or secrets. Product UI, persistence,

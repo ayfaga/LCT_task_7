@@ -1,4 +1,8 @@
-# Backend handoff: E2 prototype
+# Backend handoff: E2 prototype (historical rollback)
+
+The current joint-L336 integration uses a new versioned weight, gallery and
+refusal policy. See `JOINT_L336_DEPLOYMENT_20260925.md`. The E2-specific
+thresholds and SHA below apply only when explicitly mounting the E2 rollback.
 
 ## Components
 

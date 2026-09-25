@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "artifact": "data/derived/joint_l336_20260925/model_inference.pt",
+  "bytes": 1217580473,
+  "sha256": "507b4f2e34384e2366ab5364e147331831664493b35b40041507d88634da05f5",
+  "source_checkpoint": "data/a100_imported_data/joint_cityflow_organizer_best_epoch19.pt",
+  "source_checkpoint_sha256": "e1e3c03476d3b1af8eb9d9323b896d4e1e0859064597aaa66c79ee1b3e6e8d83",
+  "weights_sha256": "d5383ea8f4877b2472eb973e0fd72d557c7da5d3611bd527ceeb1d7162cbf428",
+  "architecture": "large",
+  "input_size": 336,
+  "embedding_dimension": 1024,
+  "training_only_keys_removed": [
+    "config",
+    "epoch",
+    "head",
+    "run_policy"
+  ],
+  "strict_load_verified": true
+}
