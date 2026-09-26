@@ -14,7 +14,7 @@
       </div>
 
       <p class="subtitle-panel">
-        Загрузите набор изображений и координаты ограничивающие контур машины. Учтите, что название изображения и текстового файла должны совпадать.
+        Загрузите набор изображений и таблицу с колонками: image_id, x, y, w, h, vehicle_id, camera_id. Для каждой строки укажите координаты прямоугольника и идентификаторы объекта.
       </p>
 
       <div class="multi-panel">
@@ -27,13 +27,20 @@
         <div class="file-panel">
           <h3>Координаты:</h3>
           <div id="coordList" class="file-list"></div>
+          <div class="bbox-table-preview hidden" id="coordTablePreview"></div>
           <button class="add-file-btn" type="button" data-type="coord">Добавить</button>
         </div>
       </div>
 
       <div class="multi-footer">
+        <button class="ghost-btn" id="archiveUploadBtn" type="button">Загрузить архив</button>
         <button class="action-btn" id="submitManyBtn" type="button">Отправить!</button>
       </div>
+      <div class="upload-status hidden" id="archiveStatus" aria-live="polite"></div>
+      <section class="many-results hidden" id="manyResults" aria-live="polite">
+        <h2>Результаты распознавания</h2>
+        <div class="many-results-grid" id="manyResultsGrid"></div>
+      </section>
     </div>
 
     <div class="modal hidden" id="renameModal" aria-hidden="true">

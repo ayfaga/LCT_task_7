@@ -17,6 +17,56 @@ let redoStack = [];
 let activeImage = null;
 let dragIndex = null;
 
+function escapeHtml(value) {
+  return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
+function closeResultModal() {
+  document.getElementById('soloResultModal')?.remove();
+}
+
+function showSoloResult(data) {
+  closeResultModal();
+  const ranked = Array.isArray(data.ranked) ? data.ranked.slice(0, 10) : [];
+  const recognized = data.status === 'matched' && ranked.length > 0;
+  const modal = document.createElement('div');
+  modal.id = 'soloResultModal';
+  modal.className = 'modal solo-result-modal';
+  if (!recognized) {
+    modal.innerHTML = '<div class="modal-backdrop"></div><section class="solo-result-dialog refusal-dialog"><button class="close-btn result-close" type="button">×</button><h2>Не знаем(</h2><p>К сожалению, модель не может дать точный ответ, какая это машина. Попробуйте еще раз!</p></section>';
+  } else {
+    const top = ranked[0];
+    const alternatives = ranked.slice(1).map((item, index) => `<li><img src="${imageUrl}" alt="Вариант ${index + 2}"><span>${escapeHtml(item.gallery_id)}</span><b>№ ${index + 2}</b></li>`).join('');
+    modal.innerHTML = `<div class="modal-backdrop"></div><section class="solo-result-dialog"><button class="close-btn result-close" type="button">×</button><div class="solo-result-main"><img class="solo-result-image" src="${imageUrl}" alt="Загруженный автомобиль"><div class="solo-result-answer"><p>Кажется, это…</p><h2>${escapeHtml(top.gallery_id)}</h2><div class="result-number">№ 1</div></div></div><h3>Возможно, это</h3><ol class="solo-alternatives">${alternatives || '<li><span>Других вариантов не найдено</span></li>'}</ol></section>`;
+  }
+  modal.addEventListener('click', (event) => { if (event.target.classList.contains('modal-backdrop') || event.target.classList.contains('result-close')) closeResultModal(); });
+  document.body.appendChild(modal);
+}
+
+function polygonBounds(polygon, image) {
+  const left = Math.max(0, Math.floor(Math.min(...polygon.map(([x]) => x))));
+  const top = Math.max(0, Math.floor(Math.min(...polygon.map(([, y]) => y))));
+  const right = Math.min(image.width, Math.ceil(Math.max(...polygon.map(([x]) => x))));
+  const bottom = Math.min(image.height, Math.ceil(Math.max(...polygon.map(([, y]) => y))));
+  if (right <= left || bottom <= top) throw new Error('Выделите область машины ещё раз.');
+  return { x: left, y: top, w: right - left, h: bottom - top };
+}
+
+function setStatus(message, kind = 'info') {
+  const panel = document.querySelector('.result-panel');
+  if (panel) {
+    panel.remove();
+  }
+  const statusBox = document.createElement('div');
+  statusBox.className = 'result-panel';
+  statusBox.textContent = message;
+  statusBox.dataset.kind = kind;
+  const toolbar = document.querySelector('.action-bar');
+  if (toolbar) {
+    toolbar.appendChild(statusBox);
+  }
+}
+
 function clearError() {
   errorMessage.classList.remove('visible');
 }
@@ -259,13 +309,57 @@ backHomeBtn.addEventListener('click', () => {
   window.location.href = '/';
 });
 
-analyzeBtn.addEventListener('click', () => {
+analyzeBtn.addEventListener('click', async () => {
   if (points.length < 3) {
     errorMessage.textContent = 'Некорректное выделение границы. Попробуйте еще раз, пожалуйста';
     errorMessage.classList.add('visible');
     return;
   }
   clearError();
+
+  if (!imageUrl) {
+    setStatus('Сначала загрузите изображение.', 'error');
+    return;
+  }
+
+  const raw = await fetch(imageUrl);
+  if (!raw.ok) {
+    errorMessage.textContent = 'Не удалось прочитать изображение.';
+    errorMessage.classList.add('visible');
+    return;
+  }
+  const blob = await raw.blob();
+  const formData = new FormData();
+  const polygon = points.map((point) => [point.x, point.y]);
+  let bounds;
+  try {
+    bounds = polygonBounds(polygon, activeImage);
+  } catch (error) {
+    errorMessage.textContent = error.message;
+    errorMessage.classList.add('visible');
+    return;
+  }
+  formData.append('image', blob, 'query.png');
+  formData.append('x', String(bounds.x));
+  formData.append('y', String(bounds.y));
+  formData.append('w', String(bounds.w));
+  formData.append('h', String(bounds.h));
+  formData.append('topk', '10');
+
+  try {
+    const response = await fetch('/api/infer', {
+      method: 'POST',
+      body: formData,
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || 'Ошибка распознавания');
+    }
+    showSoloResult(data);
+  } catch (error) {
+    errorMessage.textContent = error.message;
+    errorMessage.classList.add('visible');
+  }
 });
 
 undoBtn.addEventListener('click', undoLastPoint);
