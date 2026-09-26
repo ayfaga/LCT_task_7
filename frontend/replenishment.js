@@ -8,7 +8,66 @@ const backHomeBtn = document.getElementById('backHomeBtn');
 
 const state = { images: [], texts: [] };
 const bucket = (kind) => kind === 'image' ? state.images : state.texts;
+const BBOX_COLUMNS = ['image_id', 'x', 'y', 'w', 'h', 'vehicle_id', 'camera_id'];
 const escapeHtml = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+
+function splitDelimitedRow(line, delimiter) {
+  const values = []; let value = ''; let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    if (char === '"') {
+      if (quoted && line[i + 1] === '"') { value += '"'; i += 1; }
+      else { quoted = !quoted; }
+    } else if (char === delimiter && !quoted) {
+      values.push(value.trim()); value = '';
+    } else {
+      value += char;
+    }
+  }
+  values.push(value.trim());
+  return values;
+}
+
+function parseCoordinateTable(content) {
+  const trimmed = String(content || '').replace(/^\uFEFF/, '').trim();
+  if (!trimmed) throw new Error('Таблица пуста.');
+
+  let rows;
+  if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+    const parsed = JSON.parse(trimmed);
+    rows = Array.isArray(parsed) ? parsed : parsed.rows;
+    if (!Array.isArray(rows)) throw new Error('В JSON должна быть таблица или поле rows.');
+  } else {
+    const lines = trimmed.split(/\r?\n/).filter((line) => line.trim());
+    if (!lines.length) throw new Error('Таблица пуста.');
+    const delimiter = lines[0].includes('\t') ? '\t' : lines[0].includes(';') ? ';' : ',';
+    const headers = splitDelimitedRow(lines[0], delimiter).map((header) => header.trim());
+    rows = lines.slice(1).map((line) => {
+      const values = splitDelimitedRow(line, delimiter);
+      const row = {};
+      headers.forEach((header, index) => { row[header] = values[index] ?? ''; });
+      return row;
+    });
+  }
+
+  const columns = new Set(rows.length ? Object.keys(rows[0]) : []);
+  const missing = BBOX_COLUMNS.filter((column) => !columns.has(column));
+  if (missing.length) throw new Error(`Нужны колонки: ${BBOX_COLUMNS.join(', ')}.`);
+
+  rows.forEach((row, index) => {
+    ['x', 'y', 'w', 'h'].forEach((key) => {
+      if (!Number.isFinite(Number(row[key]))) throw new Error(`Строка ${index + 2}: «${key}» должно быть числом.`);
+    });
+  });
+
+  return rows.map((row) => Object.fromEntries(BBOX_COLUMNS.map((key) => [key, String(row[key] ?? '')])));
+}
+
+function makeTableMarkup(name, rows) {
+  const visibleRows = rows.slice(0, 5).map((row) => `<tr>${BBOX_COLUMNS.map((key) => `<td>${escapeHtml(row[key])}</td>`).join('')}</tr>`).join('');
+  const more = rows.length > 5 ? `<p>Показано 5 из ${rows.length} строк.</p>` : '';
+  return `<div class="bbox-table-title">${escapeHtml(name)}</div><div class="bbox-table-scroll"><table><thead><tr>${BBOX_COLUMNS.map((key) => `<th>${key}</th>`).join('')}</tr></thead><tbody>${visibleRows}</tbody></table></div>${more}`;
+}
 
 function setStatus(message, kind = 'info') {
   uploadStatus.className = `upload-status ${kind}`;
@@ -78,8 +137,21 @@ function ensureModal() {
 function closeModal() { document.getElementById('fileModal')?.classList.add('hidden'); }
 async function openPreview(item) {
   const modal = ensureModal(); const body = document.getElementById('fileModalBody'); body.innerHTML = '<p>Загрузка просмотра…</p>'; modal.classList.remove('hidden');
-  if (item.kind === 'image') body.innerHTML = `<h3>${escapeHtml(item.name)}</h3><img src="${item.url}" alt="${escapeHtml(item.name)}">`;
-  else try { const content = item.file ? await item.file.text() : await fetch(item.url).then((r) => r.text()); body.innerHTML = `<h3>${escapeHtml(item.name)}</h3><pre>${escapeHtml(content || 'Пустой файл')}</pre>`; } catch { body.innerHTML = '<p>Не удалось открыть текстовый файл.</p>'; }
+  if (item.kind === 'image') {
+    body.innerHTML = `<h3>${escapeHtml(item.name)}</h3><img src="${item.url}" alt="${escapeHtml(item.name)}">`;
+    return;
+  }
+
+  try {
+    const content = item.file ? await item.file.text() : await fetch(item.url).then((response) => {
+      if (!response.ok) throw new Error('Не удалось открыть таблицу.');
+      return response.text();
+    });
+    const rows = parseCoordinateTable(content);
+    body.innerHTML = `<h3>${escapeHtml(item.name)}</h3>${makeTableMarkup(item.name, rows)}`;
+  } catch (error) {
+    body.innerHTML = `<h3>${escapeHtml(item.name)}</h3><p>Не удалось открыть таблицу: ${escapeHtml(error.message || error)}</p>`;
+  }
 }
 function openRename(item) {
   const modal = ensureModal(); const body = document.getElementById('fileModalBody');

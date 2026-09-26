@@ -134,4 +134,4 @@ def test_replenishment_store_accepts_image_and_text(tmp_path, monkeypatch):
 
     page = client.get("/replenishment")
     assert page.status_code == 200
-    assert "Здравствуйте" in page.text
+    assert "image_id" in page.text and "vehicle_id" in page.text and "camera_id" in page.text

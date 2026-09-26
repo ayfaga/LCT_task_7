@@ -67,21 +67,6 @@ function setStatus(message, kind = 'info') {
   }
 }
 
-function setStatus(message, kind = 'info') {
-  const panel = document.querySelector('.result-panel');
-  if (panel) {
-    panel.remove();
-  }
-  const statusBox = document.createElement('div');
-  statusBox.className = 'result-panel';
-  statusBox.textContent = message;
-  statusBox.dataset.kind = kind;
-  const toolbar = document.querySelector('.action-bar');
-  if (toolbar) {
-    toolbar.appendChild(statusBox);
-  }
-}
-
 function clearError() {
   errorMessage.classList.remove('visible');
 }
