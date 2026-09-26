@@ -3,64 +3,47 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LCT Case Project</title>
+    <title>ЛЦТ Команда "Мечты"</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
-    <div class="page-shell">
-      <header class="hero">
-        <nav class="topbar">
-          <div class="brand">LCT</div>
-          <div class="nav-spacer"></div>
-          <button class="secondary-btn" id="historyBtn" type="button">История</button>
-        </nav>
-
-        <div class="hero-content">
-          <p class="eyebrow">Case Championship 2026</p>
-          <h1>Добро пожаловать!</h1>
-          <p class="subtitle">
-            Этот сайт разработан в рамках кейс-чемпионата тремя балбесами - Лизой, Даней и Машей,
-            мы очень старались, поэтому давайте не булльте нас.
-          </p>
-          <button class="primary-btn" id="startBtn" type="button">Начать идентификацию машин</button>
+    <div class="page-shell landing-shell">
+      <header class="hero landing-hero">
+        <div class="hero-content hero-content-compact">
+          <p class="eyebrow">Лидеры цифровой трансформации 2026 - команда "Мечты"</p>
+          <h1>Здравствуйте!</h1>
+          <p class="subtitle">Выберите необходимое действие:</p>
         </div>
       </header>
 
-      <main class="main-content">
-        <section class="panel" id="historyPanel">
-          <div class="section-header">
-            <h2>История запросов</h2>
-          </div>
-          <div id="requestsList" class="requests-list"></div>
-        </section>
+      <main class="main-content landing-grid">
+        <button class="landing-card" type="button" data-route="/replenishment">
+          <img src="/static/images/popolnenie_bd.png" alt="Пополнение базы данных" />
+          <span>Пополнение базы данных</span>
+        </button>
+
+        <button class="landing-card" type="button" data-route="/solo">
+          <img src="/static/images/ocr_machine.png" alt="Распознавание машины solo" />
+          <span>Распознавание машины (одиночное)</span>
+        </button>
+
+        <button class="landing-card" type="button" data-route="/many">
+          <img src="/static/images/multi_identification.png" alt="Распознавание машины multi" />
+          <span>Распознавание машин (массовое)</span>
+        </button>
       </main>
+
+      <section class="panel landing-panel" id="historyPanel">
+        <div class="section-header">
+          <h2>История запросов</h2>
+        </div>
+        <div id="requestsList" class="requests-list"></div>
+      </section>
     </div>
 
-    <div class="modal hidden" id="modeModal" aria-hidden="true">
-      <div class="modal-backdrop" data-close="true"></div>
-      <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-        <div class="modal-header">
-          <h2 id="modalTitle">Выберите тип идентификации</h2>
-          <button class="close-btn" id="closeModalBtn" aria-label="Закрыть">×</button>
-        </div>
-
-        <div class="choice-grid">
-          <button class="choice-card" data-mode="solo" type="button">
-            <img src="/static/images/solo_identification.png" alt="Solo identification" />
-            <span>Solo identification</span>
-          </button>
-
-          <button class="choice-card" data-mode="multi" type="button">
-            <img src="/static/images/multi_identification.png" alt="Multi identification" />
-            <span>Multi identification</span>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <script src="/static/app.js?v=20260920-1"></script>
+    <script src="/static/app.js?v=20260926-1"></script>
   </body>
 </html>

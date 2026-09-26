@@ -2,21 +2,9 @@ const state = {
   selectedMode: null,
 };
 
-const modal = document.getElementById('modeModal');
-const startBtn = document.getElementById('startBtn');
-const closeModalBtn = document.getElementById('closeModalBtn');
-const historyBtn = document.getElementById('historyBtn');
 const requestsList = document.getElementById('requestsList');
 
-function openModal() {
-  modal.classList.remove('hidden');
-  modal.setAttribute('aria-hidden', 'false');
-}
-
-function closeModal() {
-  modal.classList.add('hidden');
-  modal.setAttribute('aria-hidden', 'true');
-}
+const landingCards = document.querySelectorAll('.landing-card');
 
 function addRequestCard(item) {
   const card = document.createElement('article');
@@ -40,7 +28,7 @@ async function loadRequests() {
     const data = await response.json();
     requestsList.innerHTML = '';
     if (!Array.isArray(data) || !data.length) {
-      requestsList.innerHTML = '<p>Пока нет запросов.</p>';
+      requestsList.innerHTML = '<p>В разработке!</p>';
       return;
     }
     data.forEach(addRequestCard);
@@ -69,28 +57,13 @@ function bindDeleteButtons() {
   });
 }
 
-function handleChoice(mode) {
-  state.selectedMode = mode;
-  closeModal();
-
-  const targetRoute = mode === 'solo' ? '/solo' : '/many';
-  window.location.assign(targetRoute);
+function handleChoice(route) {
+  state.selectedMode = route;
+  window.location.assign(route);
 }
 
-startBtn.addEventListener('click', openModal);
-closeModalBtn.addEventListener('click', closeModal);
-historyBtn.addEventListener('click', () => {
-  document.getElementById('historyPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
-});
-
-modal.addEventListener('click', (event) => {
-  if (event.target.dataset.close === 'true') {
-    closeModal();
-  }
-});
-
-document.querySelectorAll('.choice-card').forEach((card) => {
-  card.addEventListener('click', () => handleChoice(card.dataset.mode));
+document.querySelectorAll('.landing-card').forEach((card) => {
+  card.addEventListener('click', () => handleChoice(card.dataset.route));
 });
 
 loadRequests();

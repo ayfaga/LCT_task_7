@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Пополнение базы данных</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="replenishment-page">
+    <div class="workbench replenishment-workbench">
+      <button class="back-link" id="backHomeBtn" type="button">← Назад</button>
+
+      <div class="page-header compact-header">
+        <h1>Просмотр базы данных</h1>
+      </div>
+
+      <div class="replenishment-intro">
+        <h2>Загрузите фото и BBOX</h2>
+        <p>Вы можете загрузить фото и BBOX в представленные окна. Также можно сразу загрузить данные архивом (из архива берутся ВСЕ фото и ВСЕ видео). Важно: для корректного сохранения фото и BBOX машины она должны иметь одинаковые названия (за исключением формата файла)</p>
+      </div>
+
+      <div class="replenishment-grid">
+        <div class="replenishment-panel">
+          <div class="replenishment-panel-header">
+            <span>Фотографии</span>
+            <button class="upload-btn small" type="button" data-mode="image">Загрузить</button>
+          </div>
+          <div id="imageUploadList" class="replenishment-file-list"></div>
+        </div>
+
+        <div class="replenishment-panel">
+          <div class="replenishment-panel-header">
+            <span>BBOX</span>
+            <button class="upload-btn small" type="button" data-mode="text">Загрузить</button>
+          </div>
+          <div id="textUploadList" class="replenishment-file-list"></div>
+        </div>
+      </div>
+
+      <div class="archive-section">
+        <button class="action-btn archive-btn" id="archiveUploadBtn" type="button">Загрузить архив</button>
+      </div>
+
+      <div class="viewer-shell hidden" id="viewerShell" aria-modal="true" role="dialog">
+        <div class="viewer-backdrop" data-close-viewer="true"></div>
+        <div class="viewer-panel">
+          <div class="viewer-header">
+            <h3>Обзор всех файлов</h3>
+            <button class="close-btn" id="closeViewerBtn" type="button" aria-label="Закрыть обзор">×</button>
+          </div>
+          <div class="viewer-layout">
+            <section class="viewer-column viewer-column-photos">
+              <div class="viewer-column-title">ФОТО</div>
+              <div class="viewer-media-list" id="viewerPhotoList"></div>
+            </section>
+            <section class="viewer-column viewer-column-bbox">
+              <div class="viewer-column-title">BBOX</div>
+              <div class="viewer-bbox-list" id="viewerTextList"></div>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <div class="upload-status hidden" id="uploadStatus" aria-live="polite"></div>
+      <div class="progress-shell hidden" id="archiveProgressShell">
+        <div class="progress-bar"><span id="archiveProgressFill"></span></div>
+        <div id="archiveProgressText">Ожидание архива…</div>
+      </div>
+    </div>
+
+    <script src="/static/replenishment.js?v=20260927"></script>
+  </body>
+</html>

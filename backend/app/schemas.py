@@ -54,6 +54,21 @@ class IdentificationRequestProcess(BaseModel):
     image_name: str | None = None
 
 
+class ReplenishmentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    label: str
+    image_name: str
+    text_name: str
+    image_path: str
+    text_path: str
+    created_at: datetime
+    updated_at: datetime
+    image_url: str | None = None
+    text_url: str | None = None
+
+
 class EmbeddingCandidate(BaseModel):
     gallery_id: str
     similarity: float

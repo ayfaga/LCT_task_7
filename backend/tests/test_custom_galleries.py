@@ -108,3 +108,30 @@ def test_rejects_unsafe_or_incomplete_archives(tmp_path, monkeypatch):
     response = client.post(f"/api/galleries/{gallery_id}/images",
                            files={"archive": ("cars.zip", mismatch, "application/zip")})
     assert response.status_code == 422
+
+
+def test_replenishment_store_accepts_image_and_text(tmp_path, monkeypatch):
+    monkeypatch.setenv("LCT_GALLERY_STATE_DIR", str(tmp_path))
+    client = TestClient(backend_module.app)
+
+    response = client.post(
+        "/api/replenishment",
+        data={"label": "car-01"},
+        files={
+            "image": ("car-01.png", photo(2), "image/png"),
+            "text": ("car-01.txt", b"vehicle plate front side cut", "text/plain"),
+        },
+    )
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["label"] == "car-01"
+    assert payload["image_name"].endswith(".png")
+    assert payload["text_name"].endswith(".txt")
+
+    list_response = client.get("/api/replenishment")
+    assert list_response.status_code == 200
+    assert any(item["label"] == "car-01" for item in list_response.json())
+
+    page = client.get("/replenishment")
+    assert page.status_code == 200
+    assert "Здравствуйте" in page.text
