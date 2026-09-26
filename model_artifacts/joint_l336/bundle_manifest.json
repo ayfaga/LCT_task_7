@@ -1,0 +1,26 @@
+{
+  "bundle_version": "joint-l336-hybrid1-20260925",
+  "members": {
+    "boosting_policy.json": {
+      "bytes": 64642,
+      "sha256": "02578b926977de01b7cdb109a4a86160653deb22075fda66f95c7d67366691d9"
+    },
+    "calibration_manifest.json": {
+      "bytes": 596,
+      "sha256": "3a7b7d9cf3c747408dbd45c0d265058d7e4d77243ffb1024c02bd0e5f490419f"
+    },
+    "model_inference.pt": {
+      "bytes": 1217580473,
+      "sha256": "507b4f2e34384e2366ab5364e147331831664493b35b40041507d88634da05f5"
+    },
+    "model_inference.pt.json": {
+      "bytes": 680,
+      "sha256": "205fb955cef93b99294102c5070a8f219acec32ca0ac72628b3094efddda3681"
+    },
+    "model_manifest.json": {
+      "bytes": 974,
+      "sha256": "454c6b03bb9064ae230f629d48ad1911646f132ab94f1f60aa62307680e46286"
+    }
+  },
+  "schema_version": 1
+}

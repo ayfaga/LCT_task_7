@@ -1,35 +1,43 @@
 from __future__ import annotations
 
+import io
+import logging
 import os
+from pathlib import Path
 from typing import Annotated
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from PIL import Image
-from sqlalchemy import select
+from PIL import Image, UnidentifiedImageError
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .database import Base, engine, get_db
+from .gallery_store import (
+    create_gallery, fail_import, gallery_dir, list_galleries, public_gallery,
+    read_gallery, retry_import, stage_import,
+)
+from .ml_gateway import MAX_IMAGE_BYTES, build_ml_gallery, call_ml, get_ml_ready
 from .models import IdentificationRequest
 from .schemas import (
-    BBox,
-    EmbeddingResponse,
     IdentificationRequestCreate,
-    IdentificationRequestProcess,
     IdentificationRequestRead,
     IdentificationRequestUpdate,
+    EmbeddingResponse,
     SearchResponse,
 )
 
 Base.metadata.create_all(bind=engine)
 app = FastAPI(title="LCT Case API", version="1.0.0")
+logger = logging.getLogger(__name__)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -46,53 +54,18 @@ async def disable_cache(request: Request, call_next):
 
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "frontend")
+UPLOAD_DIR = Path(os.getenv("LCT_UPLOAD_DIR", os.path.join(STATIC_DIR, "uploads"))).resolve()
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-MODEL_VERSION = "reid-base-v1"
-MODEL_DIMENSION = 768
-DEFAULT_THRESHOLD = 0.422
-
-
-def _read_image_bytes(file: UploadFile) -> bytes:
-    if not file or not file.filename:
+async def _upload_bytes(image: UploadFile) -> bytes:
+    if not image.filename:
         raise HTTPException(status_code=422, detail="Image file is required")
-
-    data = file.file.read()
+    data = await image.read(MAX_IMAGE_BYTES + 1)
+    if len(data) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image file is too large")
     if not data:
         raise HTTPException(status_code=422, detail="Image file is empty")
-
-    try:
-        with Image.open(__import__('io').BytesIO(data)) as image:
-            image.verify()
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail="Invalid image file") from exc
-
     return data
-
-
-def _bbox_from_form(x: int = Form(...), y: int = Form(...), w: int = Form(...), h: int = Form(...)) -> BBox:
-    try:
-        return BBox(x=x, y=y, w=w, h=h)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-def _mock_embedding() -> list[float]:
-    values = []
-    for index in range(MODEL_DIMENSION):
-        values.append(round(((index % 17) - 8) * 0.0123, 6))
-    return values
-
-
-def _mock_candidates(topk: int = 10) -> list[dict[str, float | str]]:
-    candidates = [
-        {"gallery_id": "car_812", "similarity": 0.74},
-        {"gallery_id": "car_401", "similarity": 0.63},
-        {"gallery_id": "car_980", "similarity": 0.52},
-    ]
-    if topk <= 0:
-        return []
-    return candidates[: max(1, min(topk, len(candidates)))]
 
 
 @app.get("/")
@@ -116,8 +89,15 @@ def health():
 
 
 @app.get("/ready")
-def ready():
-    return {"ready": True, "model_version": MODEL_VERSION}
+async def ready():
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        ml_state = await get_ml_ready()
+    except Exception:
+        return JSONResponse(status_code=503, content={"status": "not_ready"})
+    return {"status": "ready", **{key: ml_state[key] for key in (
+        "model_version", "preprocessing_version", "embedding_dimension", "gallery_size", "ranking")}}
 
 
 @app.get("/api/health")
@@ -125,50 +105,99 @@ def read_health():
     return {"status": "ok"}
 
 
-@app.post("/v1/embeddings")
-def create_embedding(
+@app.post("/v1/embeddings", response_model=EmbeddingResponse)
+async def create_embedding(
     image: UploadFile = File(...),
     x: int = Form(...),
     y: int = Form(...),
     w: int = Form(...),
     h: int = Form(...),
 ):
-    bbox = _bbox_from_form(x=x, y=y, w=w, h=h)
-    _read_image_bytes(image)
-
-    return {
-        "model_version": MODEL_VERSION,
-        "dimension": MODEL_DIMENSION,
-        "embedding": _mock_embedding(),
-    }
+    return await call_ml(
+        "/v1/embeddings", await _upload_bytes(image), image.filename,
+        image.content_type, {"x": x, "y": y, "w": w, "h": h},
+    )
 
 
-@app.post("/v1/search")
-def search_matches(
+@app.post("/v1/search", response_model=SearchResponse)
+@app.post("/api/identify", response_model=SearchResponse)
+@app.post("/api/infer", response_model=SearchResponse)
+async def search_matches(
     image: UploadFile = File(...),
     x: int = Form(...),
     y: int = Form(...),
     w: int = Form(...),
     h: int = Form(...),
     topk: int = Form(default=10),
+    gallery_id: str | None = Form(default=None),
 ):
-    bbox = _bbox_from_form(x=x, y=y, w=w, h=h)
-    _read_image_bytes(image)
+    if not 1 <= topk <= 100:
+        raise HTTPException(status_code=422, detail="topk must be between 1 and 100")
+    if gallery_id:
+        info = public_gallery(read_gallery(gallery_id))
+        if not info["search_ready"]:
+            raise HTTPException(status_code=409, detail="Add at least ten gallery images before searching")
+    form = {"x": x, "y": y, "w": w, "h": h, "topk": topk}
+    if gallery_id:
+        form["gallery_id"] = gallery_id
+    return await call_ml(
+        "/v1/search", await _upload_bytes(image), image.filename,
+        image.content_type, form,
+    )
 
-    candidates = _mock_candidates(topk=topk)
-    confident = [
-        {"gallery_id": candidate["gallery_id"], "similarity": float(candidate["similarity"])}
-        for candidate in candidates
-        if float(candidate["similarity"]) >= DEFAULT_THRESHOLD
-    ]
 
-    status_value = "matched" if confident else "no_confident_match"
-    response = {
-        "status": status_value,
-        "candidates": confident,
-        "model_version": MODEL_VERSION,
-    }
-    return response
+async def _finish_gallery_import(gallery_id: str, job_id: str) -> None:
+    try:
+        await build_ml_gallery(gallery_id, job_id)
+    except Exception as exc:
+        logger.exception("Gallery import failed: %s", gallery_id)
+        fail_import(gallery_id, job_id, f"Embedding failed: {type(exc).__name__}")
+
+
+@app.post("/api/galleries", status_code=201)
+def new_gallery(name: str = Form(...)):
+    return create_gallery(name)
+
+
+@app.get("/api/galleries")
+def galleries():
+    return list_galleries()
+
+
+@app.get("/api/galleries/{gallery_id}")
+def gallery(gallery_id: str):
+    return public_gallery(read_gallery(gallery_id))
+
+
+@app.post("/api/galleries/{gallery_id}/images", status_code=202)
+async def import_gallery_images(
+    gallery_id: str,
+    background_tasks: BackgroundTasks,
+    images: list[UploadFile] = File(default=[]),
+    archive: UploadFile | None = File(None),
+    manifest: UploadFile | None = File(None),
+):
+    result = await stage_import(gallery_id, images, archive, manifest)
+    background_tasks.add_task(_finish_gallery_import, gallery_id, result["job_id"])
+    return result
+
+
+@app.post("/api/galleries/{gallery_id}/retry", status_code=202)
+def retry_gallery_images(gallery_id: str, background_tasks: BackgroundTasks):
+    result = retry_import(gallery_id)
+    background_tasks.add_task(_finish_gallery_import, gallery_id, result["job_id"])
+    return result
+
+
+@app.get("/api/galleries/{gallery_id}/images/{image_key}")
+def gallery_image(gallery_id: str, image_key: str):
+    meta = read_gallery(gallery_id)
+    if not any(row["image_key"] == image_key for row in meta["images"]):
+        raise HTTPException(status_code=404, detail="Gallery image not found")
+    path = gallery_dir(gallery_id) / "images" / image_key
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Gallery image not found")
+    return FileResponse(path)
 
 
 @app.post("/api/requests", response_model=IdentificationRequestRead, status_code=status.HTTP_201_CREATED)
@@ -231,15 +260,23 @@ def upload_image(
     db: Annotated[Session, Depends(get_db)] = None,
 ):
     if not file.filename:
-        raise HTTPException(status_code=400, detail="Filename is required")
-
-    file_ext = os.path.splitext(file.filename)[1]
-    safe_name = f"{mode}_{len(os.listdir(STATIC_DIR))}_{file.filename if file.filename else 'upload'}{file_ext}"
-    path = os.path.join(STATIC_DIR, "uploads", safe_name)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-
-    with open(path, "wb") as upload_file:
-        upload_file.write(file.file.read())
+        raise HTTPException(status_code=422, detail="Filename is required")
+    extension = Path(file.filename).suffix.lower()
+    if extension not in {".jpg", ".jpeg", ".png"}:
+        raise HTTPException(status_code=422, detail="Only JPEG and PNG are supported")
+    payload = file.file.read(MAX_IMAGE_BYTES + 1)
+    if len(payload) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image file is too large")
+    try:
+        with Image.open(io.BytesIO(payload)) as source:
+            if source.format not in {"JPEG", "PNG"} or source.width * source.height > 50_000_000:
+                raise ValueError("Unsupported image")
+            source.verify()
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid image file") from exc
+    safe_name = f"{uuid4().hex}{extension}"
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    (UPLOAD_DIR / safe_name).write_bytes(payload)
 
     item = IdentificationRequest(
         title=title or ("Solo identification" if mode == "solo" else "Multi identification"),
@@ -253,14 +290,13 @@ def upload_image(
     return item
 
 
-@app.post("/api/infer", response_model=IdentificationRequestProcess)
-def run_inference(payload: IdentificationRequestProcess):
-    return payload
-
-
 @app.get("/api/images/{filename}")
 def get_image(filename: str):
-    image_path = os.path.join(STATIC_DIR, "images", filename)
-    if not os.path.exists(image_path):
+    if Path(filename).name != filename or filename in {".", ".."}:
+        raise HTTPException(status_code=404, detail="Image not found")
+    uploaded = UPLOAD_DIR / filename
+    bundled = Path(STATIC_DIR) / "images" / filename
+    image_path = uploaded if uploaded.is_file() else bundled
+    if not image_path.is_file():
         raise HTTPException(status_code=404, detail="Image not found")
     return FileResponse(image_path)

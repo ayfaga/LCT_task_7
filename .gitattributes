@@ -1,0 +1,1 @@
+model_artifacts/joint_l336/model_inference.pt filter=lfs diff=lfs merge=lfs -text

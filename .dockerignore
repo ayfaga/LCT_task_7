@@ -1,0 +1,13 @@
+.git/
+.venv/
+backend/.venv/
+backend/local.db
+backend/tests/
+backend/app/ml/
+backend/ml/
+backend/third_party/
+backend/requirements-ml.txt
+backend/Dockerfile.ml
+**/__pycache__/
+**/*.pyc
+.env
