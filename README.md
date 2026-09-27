@@ -19,6 +19,33 @@ candidate, not a verified hidden-test winner.
 
 ## Run
 
+For a local Python run, hydrate the LFS weight first. `quick_start.py` now
+checks the weight size/SHA256 and gallery **before** installing dependencies;
+it fails with a `git lfs pull` hint if the checkout contains only the 135-byte
+LFS pointer. Run it from a virtual environment to avoid changing global Python:
+
+```sh
+git lfs install
+git lfs pull
+python3 -m venv .venv
+./.venv/bin/python quick_start.py
+```
+
+If dependencies are already installed, add `--skip-install`. For a real local
+gallery, export `LCT_ML_GALLERY_PATH` to its absolute `.npz` path (and optionally
+`LCT_ML_ARTIFACT_DIR` to a separate verified bundle). `--backend-port` and
+`--ml-port` override 8000/8001. Startup waits for ML `/ready` before starting
+the backend and waits for backend `/ready` before reporting success. It does not
+generate a random gallery. The included 10-vector gallery is **synthetic demo
+data** and must not be used to claim quality or submit results.
+
+The Docker image starts with the same artifact check. `docker compose up
+--build` still requires the LFS weight and a suitable gallery to be present on
+the host; building the image from the internet is not an offline build. For an
+offline judge run, prepare the image and mounted artifacts in advance, then
+verify `docker compose up` with networking disabled. This release gate remains
+open until a clean-machine rehearsal is recorded.
+
 Place the verified model artifact directory and a gallery built by the **same** encoder on the host. In the parent research workspace the default paths now point to:
 
 - `./model_artifacts/joint_l336/` — LFS weight, manifests and portable boosting policy;

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+import logging
 
 import httpx
 from fastapi import HTTPException
 
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
+logger = logging.getLogger(__name__)
 
 
 def ml_url() -> str:
@@ -42,7 +44,15 @@ async def call_ml(path: str, data: bytes, filename: str, content_type: str | Non
     except httpx.RequestError as exc:
         raise HTTPException(status_code=503, detail="ML service is unavailable") from exc
     if response.status_code >= 500:
-        raise HTTPException(status_code=503, detail="ML service failed")
+        try:
+            upstream_detail = response.json().get("detail")
+        except (ValueError, AttributeError):
+            upstream_detail = None
+        logger.error("ML request %s failed: HTTP %s; detail=%r", path,
+                     response.status_code, upstream_detail)
+        if upstream_detail in {"ML artifacts are not ready", "ML gallery is not configured"}:
+            raise HTTPException(status_code=503, detail=upstream_detail)
+        raise HTTPException(status_code=503, detail="ML service failed; check ML service logs")
     if response.status_code not in {200, 201}:
         try:
             detail = response.json().get("detail", "ML request failed")
