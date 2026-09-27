@@ -226,31 +226,8 @@ function renderManyResults(results) {
   manyResults.classList.remove('hidden'); manyResults.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function csvCell(value) {
-  return `"${String(value ?? '').replace(/"/g, '""')}"`;
-}
-
 exportManyBtn.addEventListener('click', () => {
-  const lines = [['query_file', 'status', 'rank', 'gallery_id', 'confidence_cosine'].map(csvCell).join(',')];
-  latestResults.forEach(({ item, payload, error }) => {
-    if (error || !payload) {
-      lines.push([item.name, 'error', '', '', ''].map(csvCell).join(','));
-      return;
-    }
-    const ranked = Array.isArray(payload.ranked) ? payload.ranked.slice(0, 10) : [];
-    if (!ranked.length) lines.push([item.name, payload.status, '', '', ''].map(csvCell).join(','));
-    ranked.forEach((candidate, index) => lines.push([
-      item.name, payload.status, index + 1, candidate.gallery_id, candidate.confidence,
-    ].map(csvCell).join(',')));
-  });
-  const url = URL.createObjectURL(new Blob([lines.join('\n') + '\n'], { type: 'text/csv;charset=utf-8' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = 'reid-results.csv';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  ReidExport.download('reid-results.csv', ReidExport.manyCsv(latestResults), 'text/csv;charset=utf-8');
 });
 
 submitManyBtn.addEventListener('click', async () => {

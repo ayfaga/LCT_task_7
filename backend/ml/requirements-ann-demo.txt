@@ -1,0 +1,2 @@
+# Optional million-vector load-test service; not imported by production API.
+faiss-cpu==1.15.1

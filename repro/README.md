@@ -135,3 +135,11 @@ public-repo paths has **not** yet been performed, so exact bitwise reproduction
 is not claimed. The original A100 run and metrics are separately recorded in
 the research report. Do not substitute the currently shipped inference weight
 for the public-pretrain initialization or train on the test/holdout folds.
+
+For an audit of **the shipped frozen inference weight** without the training
+checkpoint or A100, use `backend/ml/extract_joint_audit.py` on dev and
+calibration separately, followed by `repro/audit_joint_errors.py` with the
+shipped `boosting_policy.json`. This computes cross-camera retrieval plus
+fixed-gallery open-set errors and query slices, without threshold fitting or
+holdout use. The measured protocol, output contract and limitations are in
+`docs/JOINT_ERROR_AUDIT_20260927.md`.

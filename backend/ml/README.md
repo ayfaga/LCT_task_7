@@ -1,23 +1,25 @@
 # ML adapter: current joint L336 and historical E2
 
 The **current** default bundle is the joint CityFlow+organizer L336 under
-`model_artifacts/joint_l336/` (Git LFS weight), with a newly fitted policy.
+`model_artifacts/joint_l336/` (Git LFS weight), with its own fitted policy.
 See [`docs/JOINT_L336_DEPLOYMENT_20260925.md`](../../docs/JOINT_L336_DEPLOYMENT_20260925.md)
 for its versions, thresholds, gallery mount and checks. The E2 paths and
 numbers below are retained only as rollback instructions; do not use the
 E2 booster or gallery with the joint encoder.
 
-## Historical E2 rollback
+## Historical E2 rollback — do not use as the default
 
 This section describes the previous E2+hybrid implementation. Its complete
 bundle, gallery and refusal calibration must stay together. The runnable
 two-service setup is in the repository root `README.md`.
 
-This directory is the ML-owned adapter in the backend repository. It does not
-contain model weights, organizer images, or secrets. Product UI, persistence,
-deployment operations, and a million-object index remain backend-owned.
+This directory is the ML-owned adapter in the backend repository. The current
+joint inference weight is tracked once via Git LFS outside this directory;
+organizer images and secrets are not tracked. A separate persisted million-
+vector ANN *load-test service* is available in `ann_service.py`. It uses
+synthetic distractors and does not replace the exact production gallery.
 
-## Selected bundle
+## Historical E2 bundle (not current)
 
 `dinov2-l14-l336-fresh16-best13-20260923`: DINOv2-L/14 at 336 px, one
 forward, normalized 1024-dimensional FP32 embedding. Trained inference weight

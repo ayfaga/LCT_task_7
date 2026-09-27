@@ -1,0 +1,9 @@
+# Optional admin-provisioned default gallery built from original JPEG+BBox ZIP.
+# Requires LCT_ORGANIZER_GALLERY_NPZ to be an absolute host path. The archive
+# itself and source JPEGs are never mounted into the serving containers.
+services:
+  ml:
+    environment:
+      LCT_ML_GALLERY_PATH: /organizer_gallery.npz
+    volumes:
+      - ${LCT_ORGANIZER_GALLERY_NPZ:?Set absolute path to compatible test_gallery.npz}:/organizer_gallery.npz:ro

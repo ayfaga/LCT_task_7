@@ -52,14 +52,7 @@ function cosineLabel(item) {
 }
 
 function downloadResult(data) {
-  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = 'reid-result.json';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  ReidExport.download('reid-result.json', ReidExport.soloJson(data), 'application/json;charset=utf-8');
 }
 
 function showSoloResult(data) {

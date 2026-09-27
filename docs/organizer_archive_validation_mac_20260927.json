@@ -1,0 +1,113 @@
+{
+  "status": "completed",
+  "scope": "full organizer test archive",
+  "archive_sha256": "a17950796be648c086b6d313e5d2508447e194f4ab4140bc37143d1fbba47613",
+  "model_version": "dinov2-l14-l336-joint-cityflow-organizer-best19-20260925",
+  "model_sha256": "507b4f2e34384e2366ab5364e147331831664493b35b40041507d88634da05f5",
+  "archive_records": {
+    "gallery": 750,
+    "query": 1110,
+    "bbox_source": "organizer test CSV",
+    "uses_train_or_holdout": false
+  },
+  "processed": {
+    "gallery": 750,
+    "query": 1110
+  },
+  "gallery_npz": "/private/tmp/lct_organizer_archive_full_20260927/test_gallery.npz",
+  "query_npz": "/private/tmp/lct_organizer_archive_full_20260927/test_query.npz",
+  "submission_validation": {
+    "queries": 1110,
+    "gallery": 750,
+    "embedding_shape": [
+      1860,
+      1024
+    ],
+    "submission_rows": 1110,
+    "candidates_rows": 2434,
+    "roundtrip_top10_exact": true,
+    "boosting_policy_consistent": true,
+    "empty_answers": 33
+  },
+  "elapsed_seconds": 1463.7203908750016,
+  "default_gallery_not_changed": true,
+  "array_parity": {
+    "gallery": {
+      "rows": 750,
+      "ids_and_vectors_exact": true,
+      "max_abs_diff": 0
+    },
+    "query": {
+      "rows": 1110,
+      "ids_and_vectors_exact": true,
+      "max_abs_diff": 0
+    }
+  },
+  "export_parity": {
+    "submission.csv": {
+      "sha256": "9c836283a33a1ddc5707a81a12095eba943272142763d30a74a2562a53f63aa6",
+      "equals_frozen_export": true
+    },
+    "embeddings.npy": {
+      "sha256": "1ed5e3aa08881e20f46fda30c9b9076987e78ec0dd3230b4713fdc28058f756e",
+      "equals_frozen_export": true
+    },
+    "candidates.csv": {
+      "sha256": "f94120ebe8b08e3c3a7440348b8f72863dda8ab5e2703380d3903a731f47043b",
+      "equals_frozen_export": true
+    }
+  },
+  "http_parity": {
+    "status": "passed",
+    "compared_queries": 6,
+    "input": "original organizer JPEG+xywh",
+    "ordinary_queries": 3,
+    "refusal_queries": 3,
+    "observations": [
+      {
+        "query_id": "486dd80d22f94a5496b3e670b19399a7",
+        "top10_equal": true,
+        "accepted_equal": true,
+        "refused": false
+      },
+      {
+        "query_id": "7b7e0d3f38a3435a83b8d6fb5aba99ba",
+        "top10_equal": true,
+        "accepted_equal": true,
+        "refused": false
+      },
+      {
+        "query_id": "8ba5ddc596414a9695e18a68ace669d5",
+        "top10_equal": true,
+        "accepted_equal": true,
+        "refused": true
+      },
+      {
+        "query_id": "3c7adf3c0f6a48ddae27f1be8bf94c98",
+        "top10_equal": true,
+        "accepted_equal": true,
+        "refused": false
+      },
+      {
+        "query_id": "0d39327b000c4d44854a7870268edacc",
+        "top10_equal": true,
+        "accepted_equal": true,
+        "refused": true
+      },
+      {
+        "query_id": "c0ff951246c54333b756315834f32971",
+        "top10_equal": true,
+        "accepted_equal": true,
+        "refused": true
+      }
+    ],
+    "note": "API-vs-existing-unlabeled-export parity; not a labeled quality metric."
+  },
+  "live_docker_gallery": {
+    "size": 750,
+    "ready_http": 200,
+    "mounted_read_only": true,
+    "frontend_option": "Основная (750)",
+    "user_gallery_preserved": true
+  }
+}

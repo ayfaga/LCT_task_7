@@ -14,6 +14,16 @@ The older E2 artifacts remain available as a rollback by explicitly setting
 `LCT_ML_GALLERY_PATH=../data/derived/final_e2_hybrid/test_gallery_e2.npz`.
 The rest of this README documents the existing API and user-gallery workflow.
 
+For exact artifact hashes, data provenance, Python dependencies, preprocessing,
+API/export contracts, local checks and remaining external gates, see the
+[release verification ledger](docs/RELEASE_VERIFICATION_20260927.md).
+
+For the organizer's large original JPEG + `image_id,x,y,w,h` ZIP, use the
+[streaming archive importer](docs/ORGANIZER_ARCHIVE_IMPORT.md). It builds
+the compatible gallery and all three submission files without unpacking the
+whole archive. The general replenishment button stores files only; it does
+not index this archive. Docker gallery mounting has a dedicated opt-in override.
+
 This branch provides a backend API and an isolated ML service for the selected
 joint encoder and hybrid refusal policy. The model remains a competition
 candidate, not a verified hidden-test winner.
@@ -57,7 +67,12 @@ if used, must be built by the **same** encoder. In the parent research workspace
 - `./model_artifacts/joint_l336/` — LFS weight, manifests and portable boosting policy;
 - `../data/derived/joint_l336_20260925/test_gallery_joint.npz` — optional 750-image test gallery, **not mounted by default**.
 
-For another checkout, set `LCT_ML_ARTIFACT_DIR` and `LCT_ML_GALLERY_PATH` to absolute host paths. Weights and gallery are mounted read-only. The selected weight is stored via Git LFS, while the gallery and images are not stored in Git; neither is baked into the container image.
+For another checkout, set `LCT_ML_ARTIFACT_DIR` to the absolute host path of
+the verified bundle. `LCT_ML_GALLERY_PATH` is read directly in a local Python
+run; in Docker, add an explicit read-only volume and the container-side path
+in a Compose override. Merely setting a host environment variable does not
+mount a gallery. The selected weight is stored via Git LFS; gallery images and
+embeddings are not stored in Git or baked into the container image.
 
 ```sh
 LCT_BACKEND_PORT=18000 LCT_ML_PORT=18001 docker compose up --build -d
