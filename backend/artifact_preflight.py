@@ -12,7 +12,7 @@ class ArtifactError(RuntimeError):
     """The configured inference files cannot be used."""
 
 
-def verify_artifacts(artifact_dir: Path, gallery_path: Path) -> dict:
+def verify_artifacts(artifact_dir: Path, gallery_path: Path | None = None) -> dict:
     manifest_path = artifact_dir / "model_manifest.json"
     if not manifest_path.is_file():
         raise ArtifactError(f"Model manifest is missing: {manifest_path}")
@@ -47,7 +47,7 @@ def verify_artifacts(artifact_dir: Path, gallery_path: Path) -> dict:
             digest.update(chunk)
     if digest.hexdigest() != expected_sha:
         raise ArtifactError(f"Model weight SHA256 mismatch: {weight}. Re-download the weight.")
-    if not gallery_path.is_file():
+    if gallery_path is not None and not gallery_path.is_file():
         raise ArtifactError(
             f"Gallery file is missing: {gallery_path}. Set LCT_ML_GALLERY_PATH "
             "to an existing gallery; see README.md."
@@ -59,7 +59,7 @@ if __name__ == "__main__":
     try:
         verify_artifacts(
             Path(os.environ["LCT_ML_ARTIFACT_DIR"]),
-            Path(os.environ["LCT_ML_GALLERY_PATH"]),
+            Path(os.environ["LCT_ML_GALLERY_PATH"]) if os.getenv("LCT_ML_GALLERY_PATH") else None,
         )
     except (ArtifactError, KeyError) as exc:
         raise SystemExit(f"ML artifact preflight failed: {exc}") from exc

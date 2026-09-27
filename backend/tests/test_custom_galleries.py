@@ -12,6 +12,7 @@ from PIL import Image
 
 import app.main as backend_module
 from app.ml.runtime import MLRuntime
+from app.ml.gallery_db import GalleryDatabase
 
 
 def photo(index: int) -> bytes:
@@ -31,6 +32,7 @@ def archive(files: dict[str, bytes]) -> bytes:
 def fake_runtime(folder: Path) -> MLRuntime:
     runtime = MLRuntime.__new__(MLRuntime)
     runtime.user_gallery_dir = folder
+    runtime.gallery_db = GalleryDatabase(folder / "gallery.sqlite3")
     runtime.model_version = "test-encoder"
     runtime.model_sha256 = "test-sha"
     runtime.gallery_ids = None

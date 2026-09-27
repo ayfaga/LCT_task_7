@@ -14,6 +14,7 @@ from PIL import Image
 
 from .boosting import HybridBoostingPolicy
 from .encoder import E2Encoder, file_sha256
+from .gallery_db import GalleryDatabase
 from .preprocessing import VERSION
 
 
@@ -30,6 +31,8 @@ class MLRuntime:
         self.model_sha256 = model_manifest["model_sha256"]
         self.preprocessing_version = VERSION
         self.user_gallery_dir = Path(os.getenv("LCT_ML_USER_GALLERY_DIR", "/tmp/lct_gallery_state"))
+        self.gallery_db = GalleryDatabase(os.getenv(
+            "LCT_ML_GALLERY_DB_PATH", str(self.user_gallery_dir / "gallery.sqlite3")))
         if model_manifest["preprocessing_version"] != VERSION:
             raise ValueError("Preprocessing version differs from model manifest")
         if file_sha256(Path(__file__).with_name("preprocessing.py")) != model_manifest["preprocessing_sha256"]:
@@ -57,7 +60,14 @@ class MLRuntime:
         self.gallery_ids = None
         self.gallery_embeddings = None
         if gallery_path is not None:
-            self.gallery_ids, self.gallery_embeddings = self._read_gallery(Path(gallery_path))
+            ids, vectors = self._read_gallery(Path(gallery_path))
+            self.gallery_db.replace("default", ids, vectors,
+                                    self.model_version, self.model_sha256,
+                                    [{"gallery_id": str(identity), "source": "default_npz"}
+                                     for identity in ids])
+        stored = self.gallery_db.load("default", self.model_version, self.model_sha256)
+        if stored is not None:
+            self.gallery_ids, self.gallery_embeddings = stored
 
     def _read_gallery(self, path: Path) -> tuple[np.ndarray, np.ndarray]:
         with np.load(path, allow_pickle=False) as gallery:
@@ -97,7 +107,15 @@ class MLRuntime:
             raise GalleryNotReady("Add at least ten gallery images")
         if not re.fullmatch(r"gallery_[0-9]{4,}.npz", filename):
             raise ValueError("Invalid gallery archive name")
-        return self._read_gallery(folder / filename)
+        namespace = f"user:{gallery_id}"
+        stored = self.gallery_db.load(namespace, self.model_version, self.model_sha256)
+        expected_ids = [row["gallery_id"] for row in meta["images"]]
+        if stored is None or list(map(str, stored[0])) != expected_ids:
+            ids, vectors = self._read_gallery(folder / filename)
+            self.gallery_db.replace(namespace, ids, vectors, self.model_version,
+                                    self.model_sha256, meta["images"])
+            stored = self.gallery_db.load(namespace, self.model_version, self.model_sha256)
+        return stored
 
     def build_gallery(self, gallery_id: str, job_id: str) -> dict:
         folder = self._custom_folder(gallery_id)
@@ -142,6 +160,10 @@ class MLRuntime:
                     gallery_file=filename, state="ready" if len(ids) >= 10 else "collecting",
                     error=None, processed=0)
         self._write_meta(folder, meta)
+        self.gallery_db.replace(f"user:{gallery_id}", np.asarray(ids),
+                                np.asarray(vectors, dtype=np.float32),
+                                self.model_version, self.model_sha256,
+                                meta["images"])
         return {"gallery_id": gallery_id, "image_count": len(ids),
                 "search_ready": len(ids) >= 10, "generation": generation}
 

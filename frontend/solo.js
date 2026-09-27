@@ -8,6 +8,27 @@ const redoBtn = document.getElementById('redoBtn');
 const backHomeBtn = document.getElementById('backHomeBtn');
 const replaceImageBtn = document.getElementById('replaceImageBtn');
 const analyzeBtn = document.getElementById('analyzeBtn');
+const gallerySelect = document.getElementById('soloGallerySelect');
+
+async function loadGalleryChoices() {
+  const [readyResponse, galleriesResponse] = await Promise.all([fetch('/ready'), fetch('/api/galleries')]);
+  if (!readyResponse.ok || !galleriesResponse.ok) throw new Error('Не удалось получить список галерей.');
+  const ready = await readyResponse.json();
+  const galleries = await galleriesResponse.json();
+  gallerySelect.replaceChildren();
+  if (ready.gallery_ready) gallerySelect.add(new Option(`Основная (${ready.gallery_size})`, ''));
+  for (const gallery of galleries.filter((entry) => entry.search_ready)) {
+    gallerySelect.add(new Option(`${gallery.name} (${gallery.image_count})`, gallery.gallery_id));
+  }
+  if (!gallerySelect.options.length) {
+    gallerySelect.add(new Option('Нет готовой галереи', ''));
+    gallerySelect.disabled = true;
+  }
+}
+const gallerySelectionReady = loadGalleryChoices().catch((error) => {
+  gallerySelect.replaceChildren(new Option(error.message, ''));
+  gallerySelect.disabled = true;
+});
 
 const MAX_POINTS = 4;
 
@@ -25,21 +46,39 @@ function closeResultModal() {
   document.getElementById('soloResultModal')?.remove();
 }
 
+function cosineLabel(item) {
+  const score = Number(item?.confidence);
+  return Number.isFinite(score) ? score.toFixed(3) : '—';
+}
+
+function downloadResult(data) {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'reid-result.json';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
 function showSoloResult(data) {
   closeResultModal();
   const ranked = Array.isArray(data.ranked) ? data.ranked.slice(0, 10) : [];
-  const recognized = data.status === 'matched' && ranked.length > 0;
+  const accepted = Array.isArray(data.accepted) ? data.accepted : [];
+  const recognized = data.status === 'matched' && accepted.length > 0;
   const modal = document.createElement('div');
   modal.id = 'soloResultModal';
   modal.className = 'modal solo-result-modal';
   if (!recognized) {
-    modal.innerHTML = '<div class="modal-backdrop"></div><section class="solo-result-dialog refusal-dialog"><button class="close-btn result-close" type="button">×</button><h2>Не знаем(</h2><p>К сожалению, модель не может дать точный ответ, какая это машина. Попробуйте еще раз!</p></section>';
+    modal.innerHTML = '<div class="modal-backdrop"></div><section class="solo-result-dialog refusal-dialog"><button class="close-btn result-close" type="button">×</button><h2>Совпадение не подтверждено</h2><p>Модель отказалась от ответа. Ранжированный список доступен в экспорте.</p><button class="ghost-btn result-export" type="button">Скачать результат JSON</button></section>';
   } else {
-    const top = ranked[0];
-    const alternatives = ranked.slice(1).map((item, index) => `<li><img src="${imageUrl}" alt="Вариант ${index + 2}"><span>${escapeHtml(item.gallery_id)}</span><b>№ ${index + 2}</b></li>`).join('');
-    modal.innerHTML = `<div class="modal-backdrop"></div><section class="solo-result-dialog"><button class="close-btn result-close" type="button">×</button><div class="solo-result-main"><img class="solo-result-image" src="${imageUrl}" alt="Загруженный автомобиль"><div class="solo-result-answer"><p>Кажется, это…</p><h2>${escapeHtml(top.gallery_id)}</h2><div class="result-number">№ 1</div></div></div><h3>Возможно, это</h3><ol class="solo-alternatives">${alternatives || '<li><span>Других вариантов не найдено</span></li>'}</ol></section>`;
+    const top = accepted[0];
+    const alternatives = ranked.filter((item) => item.gallery_id !== top.gallery_id).map((item) => `<li><span>${escapeHtml(item.gallery_id)} · cosine ${cosineLabel(item)}</span></li>`).join('');
+    modal.innerHTML = `<div class="modal-backdrop"></div><section class="solo-result-dialog"><button class="close-btn result-close" type="button">×</button><div class="solo-result-main"><img class="solo-result-image" src="${imageUrl}" alt="Загруженный автомобиль"><div class="solo-result-answer"><p>Принятый кандидат</p><h2>${escapeHtml(top.gallery_id)}</h2><p>Сходство cosine: ${cosineLabel(top)} (не вероятность)</p></div></div><h3>Остальные в top‑10</h3><ol class="solo-alternatives">${alternatives || '<li><span>Других вариантов не найдено</span></li>'}</ol><button class="ghost-btn result-export" type="button">Скачать результат JSON</button></section>`;
   }
   modal.addEventListener('click', (event) => { if (event.target.classList.contains('modal-backdrop') || event.target.classList.contains('result-close')) closeResultModal(); });
+  modal.querySelector('.result-export')?.addEventListener('click', () => downloadResult(data));
   document.body.appendChild(modal);
 }
 
@@ -345,6 +384,13 @@ analyzeBtn.addEventListener('click', async () => {
   formData.append('w', String(bounds.w));
   formData.append('h', String(bounds.h));
   formData.append('topk', '10');
+  await gallerySelectionReady;
+  if (gallerySelect.disabled) {
+    errorMessage.textContent = 'Галерея не готова. Загрузите минимум 10 изображений через /docs → /api/galleries.';
+    errorMessage.classList.add('visible');
+    return;
+  }
+  if (gallerySelect.value) formData.append('gallery_id', gallerySelect.value);
 
   try {
     const response = await fetch('/api/infer', {

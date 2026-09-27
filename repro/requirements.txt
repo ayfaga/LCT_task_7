@@ -1,0 +1,9 @@
+# Reproduction environment; inference uses backend/requirements-ml.txt.
+numpy==2.5.3
+pandas==2.3.2
+Pillow==10.4.0
+opencv-python==4.13.0.92
+torch==2.8.0
+torchvision==0.23.0
+scikit-learn==1.6.1
+joblib==1.5.1

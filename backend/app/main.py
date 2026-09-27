@@ -108,7 +108,8 @@ async def ready():
     except Exception:
         return JSONResponse(status_code=503, content={"status": "not_ready"})
     return {"status": "ready", **{key: ml_state[key] for key in (
-        "model_version", "preprocessing_version", "embedding_dimension", "gallery_size", "ranking")}}
+        "model_version", "preprocessing_version", "embedding_dimension", "gallery_size", "ranking")},
+            "gallery_ready": ml_state.get("gallery_ready", ml_state["gallery_size"] > 0)}
 
 
 @app.get("/api/health")

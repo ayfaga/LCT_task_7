@@ -104,7 +104,7 @@ def health() -> dict:
 @app.get("/ready")
 def ready():
     try:
-        runtime = _runtime(require_gallery=True)
+        runtime = _runtime(require_gallery=False)
     except HTTPException:
         return JSONResponse(status_code=503, content={"status": "not_ready"})
     return {
@@ -112,7 +112,8 @@ def ready():
         "model_version": runtime.model_version,
         "preprocessing_version": runtime.preprocessing_version,
         "embedding_dimension": runtime.encoder.dimension,
-        "gallery_size": len(runtime.gallery_ids),
+        "gallery_size": len(runtime.gallery_ids) if runtime.gallery_ids is not None else 0,
+        "gallery_ready": runtime.search_ready,
         "ranking": "exact_cosine",
     }
 

@@ -17,7 +17,6 @@ BACKEND_DIR = ROOT / "backend"
 BACKEND_REQUIREMENTS = BACKEND_DIR / "requirements.txt"
 ML_REQUIREMENTS = BACKEND_DIR / "requirements-ml.txt"
 DEFAULT_ARTIFACT_DIR = ROOT / "model_artifacts" / "joint_l336"
-DEFAULT_GALLERY = DEFAULT_ARTIFACT_DIR / "test_gallery_joint.npz"
 
 sys.path.insert(0, str(BACKEND_DIR))
 from artifact_preflight import ArtifactError, verify_artifacts  # noqa: E402
@@ -40,9 +39,10 @@ def install_dependencies() -> None:
                 "Installing ML dependencies")
 
 
-def configured_paths() -> tuple[Path, Path]:
+def configured_paths() -> tuple[Path, Path | None]:
     artifact_dir = Path(os.environ.get("LCT_ML_ARTIFACT_DIR", str(DEFAULT_ARTIFACT_DIR))).expanduser().resolve()
-    gallery_path = Path(os.environ.get("LCT_ML_GALLERY_PATH", str(DEFAULT_GALLERY))).expanduser().resolve()
+    gallery_setting = os.environ.get("LCT_ML_GALLERY_PATH", "")
+    gallery_path = Path(gallery_setting).expanduser().resolve() if gallery_setting else None
     return artifact_dir, gallery_path
 
 
@@ -84,7 +84,7 @@ def check_port_available(port: int) -> None:
         raise RuntimeError(f"Port {port} is unavailable; choose another --backend-port/--ml-port") from exc
 
 
-def start_local_stack(artifact_dir: Path, gallery_path: Path,
+def start_local_stack(artifact_dir: Path, gallery_path: Path | None,
                       backend_port: int, ml_port: int) -> None:
     if backend_port == ml_port or not all(1 <= port <= 65535 for port in (backend_port, ml_port)):
         raise ValueError("Backend and ML ports must be different and in 1..65535")
@@ -93,17 +93,18 @@ def start_local_stack(artifact_dir: Path, gallery_path: Path,
     env = os.environ.copy()
     env["PYTHONPATH"] = str(BACKEND_DIR) + os.pathsep + env.get("PYTHONPATH", "")
     env["LCT_ML_ARTIFACT_DIR"] = str(artifact_dir)
-    env["LCT_ML_GALLERY_PATH"] = str(gallery_path)
+    env["LCT_ML_GALLERY_PATH"] = str(gallery_path) if gallery_path else ""
     env["LCT_ML_SERVICE_URL"] = f"http://127.0.0.1:{ml_port}"
     env.setdefault("LCT_ML_USER_GALLERY_DIR", str(ROOT / "gallery_state"))
+    env.setdefault("LCT_ML_GALLERY_DB_PATH", str(ROOT / "gallery_state" / "gallery.sqlite3"))
     env.setdefault("LCT_UPLOAD_DIR", str(ROOT / "uploads"))
     env.setdefault("LCT_GALLERY_STATE_DIR", str(ROOT / "gallery_state"))
     env.setdefault("DATABASE_URL", f"sqlite:///{ROOT / 'local.db'}")
 
     print(f"\nBackend: http://127.0.0.1:{backend_port}/docs", flush=True)
     print(f"ML: http://127.0.0.1:{ml_port}/ready", flush=True)
-    if gallery_path == DEFAULT_GALLERY.resolve():
-        print("WARNING: the bundled gallery is synthetic demo data, not an evaluation gallery.",
+    if gallery_path is None:
+        print("No default gallery configured. Upload a gallery through the API/browser.",
               flush=True)
     print("Press Ctrl+C to stop both services.\n", flush=True)
     ml_process = None

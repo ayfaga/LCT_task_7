@@ -1,0 +1,12 @@
+{
+  "status": "research_only",
+  "research_allowed": true,
+  "research_authorization": "2026-09-19: user requested continued hackathon experiments on organizer-provided crops with separate plate-risk slices, without full relabeling. Explicit --research-only records this limitation; final export is not automatically approved.",
+  "reason": "Visual augmentation audit found an unredacted adjacent-vehicle plate in v1 sanitized crop 735865fda883408cbf1b2803060b4ee8. Do not use v1 for compliant training or submission.",
+  "affected_crops": "data/derived/sanitized",
+  "affected_experiments": ["outputs/experiments/frozen_cls", "outputs/experiments/frozen_mean", "outputs/experiments/frozen_concat", "outputs/training/none", "outputs/training/mild"],
+  "masking_work_status": "discontinued_by_user_2026-09-19; no additional neighboring-plate masks, including counterfactual experiments; use organizer crops and evaluate query slices only",
+  "historical_candidate_fix": "ml/privacy_v2.py pilot was not approved and is no longer part of the active plan; retained only as historical evidence.",
+  "v2_audit_suspects": ["1b2d9832d1f4499ca94c7c68ed01066d", "d5110abe882f4001a5c092f614b19e33", "9b81ed3fa8d7439489fc52dd46beee74"],
+  "required_before_release": ["document residual plate risk and same-gallery evaluation slices; do not equate unreviewed crops with clean crops", "verify no OCR, plate descriptors, metadata or plate-derived reranking is used", "freeze selected preprocessing and model manifest; clarify residual anonymization compliance with organizers if needed", "separate release decision from research permission; review licenses of components actually shipped"]
+}
