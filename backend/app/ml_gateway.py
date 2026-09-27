@@ -50,7 +50,9 @@ async def call_ml(path: str, data: bytes, filename: str, content_type: str | Non
             upstream_detail = None
         logger.error("ML request %s failed: HTTP %s; detail=%r", path,
                      response.status_code, upstream_detail)
-        if upstream_detail in {"ML artifacts are not ready", "ML gallery is not configured"}:
+        if isinstance(upstream_detail, str) and upstream_detail in {
+            "ML artifacts are not ready", "ML gallery is not configured",
+        }:
             raise HTTPException(status_code=503, detail=upstream_detail)
         raise HTTPException(status_code=503, detail="ML service failed; check ML service logs")
     if response.status_code not in {200, 201}:
