@@ -44,9 +44,12 @@ Check `git lfs ls-files` and verify the weight with `shasum -a 256`.
 The organizer 750-image test gallery is not part of Git and must be mounted
 from the outer workspace or regenerated with `backend/ml/build_gallery.py`.
 It **must** be embedded by this model and carry this model version/SHA.
-The old `test_gallery_e2.npz` is incompatible. Compose defaults to
-`../data/derived/joint_l336_20260925/test_gallery_joint.npz`; set
-`LCT_ML_GALLERY_PATH` to another absolute host path if needed.
+The old `test_gallery_e2.npz` is incompatible. Current Compose starts with
+an **empty persistent default gallery**, not the organizer test gallery.
+User galleries are uploaded through the API. For a precomputed default gallery,
+mount a version-compatible NPZ into the ML container and set the container's
+`LCT_ML_GALLERY_PATH` explicitly in a local Compose override; merely exporting
+a host path does not mount that file into Docker.
 
 ```sh
 docker compose up --build -d
@@ -81,6 +84,9 @@ Do not push organizer images, raw CityFlow data, old E2 weights or a second
 copy of the training checkpoint into this Git branch. A clean competition
 submission contains only the inference weight and separately generated
 `submission.csv`, `embeddings.npy` and `candidates.csv`.
+
+The current implementation/verification ledger, including offline-build and
+browser-export limitations, is in [release verification](RELEASE_VERIFICATION_20260927.md).
 
 ## Measurements and limitations
 

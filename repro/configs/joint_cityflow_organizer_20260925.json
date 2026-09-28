@@ -1,0 +1,40 @@
+{
+  "experiment_id": "joint_cityflow_organizer_l336_20260925",
+  "hypothesis": "Simultaneous, source-balanced training retains target-domain retrieval quality better than CityFlow followed by organizer fine-tuning",
+  "architecture": "DINOv2 ViT-L/14, input 336x336, CLS 1024D",
+  "initialization": "official public DINOv2 ViT-L/14 checkpoint; no prior CityFlow or organizer fine-tune",
+  "train_sources": {
+    "cityflow": "official AIC21 Track2 labeled train: 52717 images, 440 IDs, from verified ZIP, no extraction",
+    "organizer": "unchanged organizer train identity fold: 6209 crops, 1001 IDs",
+    "labels": "dataset plus vehicle ID; no ID collision across sources"
+  },
+  "sampler": "per batch 4 CityFlow IDs and 4 organizer IDs, 4 images per ID; camera and CityFlow track aware",
+  "batch_size": 32,
+  "optimization": {
+    "epochs": 20,
+    "steps_per_epoch": 335,
+    "total_updates": 6700,
+    "sequential_control_updates": 6704,
+    "presentations_per_source": 107200,
+    "trainable": "last four transformer blocks and final norm",
+    "loss": "combined ID cross-entropy (label smoothing .1) plus within-source batch-hard metric loss",
+    "augmentation": "mild for both sources with matching random erasing",
+    "backbone_lr": 1e-05,
+    "head_lr": 0.0003,
+    "warmup_epochs": 2,
+    "weight_decay": 0.04,
+    "precision": "BF16",
+    "seed": 20260918,
+    "workers": 0
+  },
+  "evaluation": {
+    "checkpoint_selection": "best cross-camera organizer dev mAP across 20 epochs, BF16 evaluation",
+    "final_precision": "FP32",
+    "folds": ["organizer dev: 1449 images, 231 IDs", "organizer calibration: 929 images, 154 IDs"],
+    "comparisons": ["frozen E2", "sequential CityFlow to organizer candidate"],
+    "method": "same cross-camera query/gallery, cosine, paired vehicle-ID bootstrap 5000 draws",
+    "holdout": "excluded; previously used for one-shot E2/refit comparison"
+  },
+  "storage": "best model-only checkpoint, no optimizer state or full archive extraction",
+  "release": "research-only; no automatic backend or model switch"
+}

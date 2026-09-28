@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 from collections import defaultdict
+from contextlib import nullcontext
 from pathlib import Path
+from zipfile import ZipFile
 
 import httpx
 from PIL import Image
@@ -16,7 +19,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://127.0.0.1:18000")
     parser.add_argument("--export", required=True, type=Path)
-    parser.add_argument("--crop-dir", required=True, type=Path)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--crop-dir", type=Path)
+    source.add_argument("--organizer-archive", type=Path,
+                        help="Use original test JPEG+xywh, not cached PNG crops")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     with (args.export / "submission.csv").open(newline="") as stream:
@@ -32,15 +38,31 @@ def main() -> None:
     by_query = {row["query_id"]: row for row in submission}
     selected = [submission[i]["query_id"] for i in (0, 100, 500, 1000)] + refused[:2]
     observations = []
-    with httpx.Client(timeout=120.0) as client:
+    archive_context = ZipFile(args.organizer_archive) if args.organizer_archive else nullcontext(None)
+    with httpx.Client(timeout=120.0) as client, archive_context as archive:
+        bboxes = {}
+        if archive is not None:
+            table = csv.DictReader(io.StringIO(archive.read("test_query.csv").decode("utf-8-sig")))
+            if not table.fieldnames or not {"image_id", "x", "y", "w", "h"}.issubset(table.fieldnames):
+                raise ValueError("Organizer query CSV must provide image_id,x,y,w,h")
+            bboxes = {row["image_id"]: {key: int(row[key]) for key in ("x", "y", "w", "h")}
+                      for row in table}
         for query_id in selected:
-            path = args.crop_dir / f"{query_id}.png"
-            with Image.open(path) as image:
-                width, height = image.size
+            if archive is not None:
+                filename = f"{query_id}.jpg"
+                payload = archive.read(f"images/{filename}")
+                bbox = bboxes[query_id]
+                mime = "image/jpeg"
+            else:
+                path = args.crop_dir / f"{query_id}.png"
+                with Image.open(path) as image:
+                    width, height = image.size
+                filename, payload, mime = path.name, path.read_bytes(), "image/png"
+                bbox = {"x": 0, "y": 0, "w": width, "h": height}
             response = client.post(
                 f"{args.url.rstrip('/')}/api/identify",
-                data={"x": 0, "y": 0, "w": width, "h": height, "topk": 10},
-                files={"image": (path.name, path.read_bytes(), "image/png")},
+                data={**bbox, "topk": 10},
+                files={"image": (filename, payload, mime)},
             )
             response.raise_for_status()
             result = response.json()
@@ -59,6 +81,7 @@ def main() -> None:
             observations.append({"query_id": query_id, "top10_equal": True,
                                  "accepted_equal": True, "refused": query_id in refused})
     output = {"status": "passed", "compared_queries": len(selected),
+              "input": "original organizer JPEG+xywh" if args.organizer_archive else "cached PNG crop",
               "ordinary_queries": sum(not row["refused"] for row in observations),
               "refusal_queries": sum(row["refused"] for row in observations),
               "observations": observations,

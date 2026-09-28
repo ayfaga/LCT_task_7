@@ -14,7 +14,7 @@
       </div>
 
       <p class="subtitle-panel">
-        Загрузите набор изображений и таблицу с колонками: image_id, x, y, w, h, vehicle_id, camera_id. Для каждой строки укажите координаты прямоугольника и идентификаторы объекта.
+        Загрузите набор изображений и таблицу с колонками: image_id, x, y, w, h. Для каждой строки укажите BBox объекта; ID автомобиля и камеры для инференса не требуются.
       </p>
 
       <div class="multi-panel">
@@ -33,12 +33,14 @@
       </div>
 
       <div class="multi-footer">
+        <label for="manyGallerySelect">Галерея: <select id="manyGallerySelect" aria-label="Галерея для поиска"><option value="">Загрузка списка…</option></select></label>
         <button class="ghost-btn" id="archiveUploadBtn" type="button">Загрузить архив</button>
         <button class="action-btn" id="submitManyBtn" type="button">Отправить!</button>
       </div>
       <div class="upload-status hidden" id="archiveStatus" aria-live="polite"></div>
       <section class="many-results hidden" id="manyResults" aria-live="polite">
         <h2>Результаты распознавания</h2>
+        <button class="ghost-btn" id="exportManyBtn" type="button">Скачать результаты CSV</button>
         <div class="many-results-grid" id="manyResultsGrid"></div>
       </section>
     </div>
@@ -75,6 +77,7 @@
       <div class="preview-modal-content" id="previewContent"></div>
     </div>
 
-    <script src="/static/many.js?v=20260920-1"></script>
+    <script src="/static/export.js?v=20260927-1"></script>
+    <script src="/static/many.js?v=20260927-4"></script>
   </body>
 </html>

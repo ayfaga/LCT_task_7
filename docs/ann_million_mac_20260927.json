@@ -1,0 +1,19 @@
+{
+  "status": "completed",
+  "index": "FAISS IVF-SQ8 inner product",
+  "dimension": 1024,
+  "real_gallery": 750,
+  "synthetic_distractors": 1000000,
+  "total_vectors": 1000750,
+  "query_count": 10,
+  "nlist": 64,
+  "nprobe": 16,
+  "training_seconds": 0.057470083999987764,
+  "addition_seconds": 0.7196329970010993,
+  "exact_streamed_dot_seconds": 0.20830020799985505,
+  "ann_search_batch_seconds_median": 0.14321462499992776,
+  "ann_search_per_query_ms_median": 14.321462499992776,
+  "recall_at_10_vs_exact": 0.9800000000000001,
+  "peak_process_rss_mib": 1558.171875,
+  "scope": "Mac synthetic-load tie-break demo; not production index or organizer speed"
+}

@@ -40,6 +40,10 @@ frontend/uploads/
 backend/.pytest_cache/
 .pytest_cache/
 backend/ml_artifacts/
+.deck_build/
+# Local-only jury drafts. The diagnostic PNG embeds organizer pixels.
+docs/LCT_Vehicle_ReID_jury_20260927*.pptx
+docs/patch_similarity_example_20260927.png
 
 # Only the minimal Apache-2.0 DINOv2 inference files are explicitly vendored.
 # The larger local source checkout (docs/notebooks/training code) is not shipped.

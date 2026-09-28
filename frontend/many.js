@@ -15,9 +15,32 @@ const archiveUploadBtn = document.getElementById('archiveUploadBtn');
 const archiveStatus = document.getElementById('archiveStatus');
 const manyResults = document.getElementById('manyResults');
 const manyResultsGrid = document.getElementById('manyResultsGrid');
+const exportManyBtn = document.getElementById('exportManyBtn');
+const gallerySelect = document.getElementById('manyGallerySelect');
+let latestResults = [];
 
-const TABLE_COLUMNS = ['image_id', 'x', 'y', 'w', 'h', 'vehicle_id', 'camera_id'];
+const TABLE_COLUMNS = ['image_id', 'x', 'y', 'w', 'h'];
 const state = { activeRename: null, fileStore: { image: [], coord: [] } };
+
+async function loadGalleryChoices() {
+  const [readyResponse, galleriesResponse] = await Promise.all([fetch('/ready'), fetch('/api/galleries')]);
+  if (!readyResponse.ok || !galleriesResponse.ok) throw new Error('Не удалось получить список галерей.');
+  const ready = await readyResponse.json();
+  const galleries = await galleriesResponse.json();
+  gallerySelect.replaceChildren();
+  if (ready.gallery_ready) gallerySelect.add(new Option(`Основная (${ready.gallery_size})`, ''));
+  for (const gallery of galleries.filter((entry) => entry.search_ready)) {
+    gallerySelect.add(new Option(`${gallery.name} (${gallery.image_count})`, gallery.gallery_id));
+  }
+  if (!gallerySelect.options.length) {
+    gallerySelect.add(new Option('Нет готовой галереи', ''));
+    gallerySelect.disabled = true;
+  }
+}
+const gallerySelectionReady = loadGalleryChoices().catch((error) => {
+  gallerySelect.replaceChildren(new Option(error.message, ''));
+  gallerySelect.disabled = true;
+});
 
 const escapeHtml = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 const fileStem = (name) => String(name || '').replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '').toLowerCase();
@@ -186,15 +209,30 @@ function fitBounds(row, size) {
   return { x, y, w: right - x, h: bottom - y };
 }
 function renderManyResults(results) {
+  latestResults = results;
   manyResultsGrid.innerHTML = results.map(({ item, payload, error }) => {
-    const recognized = !error && payload.status === 'matched' && payload.ranked?.length;
-    const label = recognized ? escapeHtml(payload.ranked[0].gallery_id) : 'Не распознано';
-    return `<article class="many-result-card"><img src="${item.preview}" alt="${escapeHtml(item.name)}"><div class="many-result-caption"><strong>${label}</strong><span>${recognized ? '№ 1' : ''}</span></div>${error ? `<small>${escapeHtml(error.message || error)}</small>` : ''}</article>`;
+    const accepted = !error && Array.isArray(payload?.accepted) ? payload.accepted : [];
+    const recognized = payload?.status === 'matched' && accepted.length > 0;
+    const chosen = recognized ? accepted[0] : null;
+    const label = chosen ? escapeHtml(chosen.gallery_id) : 'Нет уверенного совпадения';
+    const score = chosen && Number.isFinite(Number(chosen.confidence)) ? Number(chosen.confidence).toFixed(3) : '';
+    const ranked = Array.isArray(payload?.ranked) ? payload.ranked.slice(0, 10) : [];
+    const ranking = ranked.map((candidate) => {
+      const value = Number(candidate.confidence);
+      return `<li>${escapeHtml(candidate.gallery_id)} · cosine ${Number.isFinite(value) ? value.toFixed(3) : '—'}</li>`;
+    }).join('');
+    return `<article class="many-result-card"><img src="${item.preview}" alt="${escapeHtml(item.name)}"><div class="many-result-caption"><strong>${label}</strong><span>${score ? `cosine ${score} (не вероятность)` : ''}</span></div>${ranking ? `<details><summary>Top‑10</summary><ol>${ranking}</ol></details>` : ''}${error ? `<small>${escapeHtml(error.message || error)}</small>` : ''}</article>`;
   }).join('');
   manyResults.classList.remove('hidden'); manyResults.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+exportManyBtn.addEventListener('click', () => {
+  ReidExport.download('reid-results.csv', ReidExport.manyCsv(latestResults), 'text/csv;charset=utf-8');
+});
+
 submitManyBtn.addEventListener('click', async () => {
+  await gallerySelectionReady;
+  if (gallerySelect.disabled) { setArchiveStatus('Галерея не готова. Загрузите минимум 10 изображений через /docs → /api/galleries.', 'error'); return; }
   const images = state.fileStore.image;
   if (!images.length) { setArchiveStatus('Добавьте хотя бы одно изображение.', 'error'); return; }
   if (!state.fileStore.coord.length) { setArchiveStatus('Загрузите таблицу с указанными ниже колонками.', 'error'); return; }
@@ -207,6 +245,7 @@ submitManyBtn.addEventListener('click', async () => {
         const row = findRowForImage(rows, item); if (!row) throw new Error('строка с этим image_id не найдена');
         const bbox = fitBounds(row, size); const body = new FormData(); body.append('image', blob, item.name || 'query.png');
         Object.entries(bbox).forEach(([key, value]) => body.append(key, String(value))); body.append('topk', '10');
+        if (gallerySelect.value) body.append('gallery_id', gallerySelect.value);
         const response = await fetch('/api/infer', { method: 'POST', body }); const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail || 'ошибка распознавания'); results.push({ item, payload });
       } catch (error) { results.push({ item, error }); }

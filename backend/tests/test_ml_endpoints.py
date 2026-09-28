@@ -115,6 +115,27 @@ def test_unready_ml_service_yields_503(connected_services, monkeypatch):
     assert request("/api/identify").status_code == 503
 
 
+def test_backend_explains_unloadable_ml_artifacts(connected_services, monkeypatch):
+    def fail_loading(*args):
+        raise RuntimeError("bad checkpoint")
+
+    monkeypatch.setattr(ml_api, "_load_runtime", fail_loading)
+    response = request("/api/identify")
+    assert response.status_code == 503
+    assert response.json()["detail"] == "ML artifacts are not ready"
+
+
+def test_empty_default_gallery_keeps_services_ready_for_upload(connected_services, monkeypatch):
+    runtime = ml_api._load_runtime("/fixture", "", "auto")
+    runtime.gallery_ids = None
+    runtime.search_ready = False
+    monkeypatch.setattr(ml_api, "_load_runtime", lambda *args: runtime)
+    assert ml.get("/ready").json()["gallery_ready"] is False
+    backend_ready = backend.get("/ready")
+    assert backend_ready.status_code == 200
+    assert backend_ready.json()["gallery_size"] == 0
+
+
 def test_refusal_is_successful_empty_answer(connected_services, monkeypatch):
     class RefusalRuntime:
         model_version = "dinov2-l14-l336-fresh16-best13-20260923"

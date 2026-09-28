@@ -26,6 +26,7 @@ def main() -> None:
     parser.add_argument("--image", type=Path, required=True)
     parser.add_argument("--bbox", type=int, nargs=4, required=True, metavar=("X", "Y", "W", "H"))
     parser.add_argument("--expected-top1", required=True)
+    parser.add_argument("--gallery-id", help="Optional user gallery; omitted for default gallery")
     parser.add_argument("--sequential", type=int, default=10)
     parser.add_argument("--concurrent", type=int, default=12)
     parser.add_argument("--workers", type=int, default=3)
@@ -34,6 +35,8 @@ def main() -> None:
     payload = args.image.read_bytes()
     x, y, w, h = args.bbox
     form = {"x": x, "y": y, "w": w, "h": h, "topk": 10}
+    if args.gallery_id:
+        form["gallery_id"] = args.gallery_id
     files = {"image": (args.image.name, payload, "image/png")}
     url = args.url.rstrip("/")
     times = {"warmup": [], "sequential": [], "concurrent": []}
@@ -42,6 +45,11 @@ def main() -> None:
     with httpx.Client(timeout=120.0) as client:
         ready = client.get(f"{url}/ready")
         ready.raise_for_status()
+        gallery_size = ready.json()["gallery_size"]
+        if args.gallery_id:
+            gallery_response = client.get(f"{url}/api/galleries/{args.gallery_id}")
+            gallery_response.raise_for_status()
+            gallery_size = gallery_response.json()["image_count"]
         openapi = client.get(f"{url}/openapi.json")
         openapi.raise_for_status()
         paths = openapi.json()["paths"]
@@ -75,7 +83,7 @@ def main() -> None:
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
             times["concurrent"] = list(pool.map(lambda _: once(), range(args.concurrent)))
         concurrent_wall = time.perf_counter() - started
-        embedding = client.post(f"{url}/v1/embeddings", data={k: v for k, v in form.items() if k != "topk"}, files=files)
+        embedding = client.post(f"{url}/v1/embeddings", data={k: v for k, v in form.items() if k not in ("topk", "gallery_id")}, files=files)
         embedding.raise_for_status()
         if embedding.json()["dimension"] != 1024 or len(embedding.json()["embedding"]) != 1024:
             raise AssertionError("Embedding response is invalid")
@@ -87,7 +95,9 @@ def main() -> None:
         raise AssertionError("Identical image yielded inconsistent responses")
     summary = {
         "status": "passed", "model_version": ready.json()["model_version"],
-        "gallery_size": ready.json()["gallery_size"], "host_test_scope": "local Docker Desktop, CPU, 750 gallery",
+        "gallery_size": gallery_size,
+        "host_test_scope": "local Docker Desktop, CPU, user gallery" if args.gallery_id else "local Docker Desktop, CPU, default gallery",
+        "gallery_id": args.gallery_id,
         "requests": {"warmup": 2, "sequential": args.sequential, "concurrent": args.concurrent,
                      "workers": args.workers, "failures": 0},
         "sequential_seconds": {"median": statistics.median(times["sequential"]),
