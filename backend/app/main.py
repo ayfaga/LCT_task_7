@@ -64,15 +64,15 @@ UPLOAD_DIR = Path(os.getenv("LCT_UPLOAD_DIR", os.path.join(STATIC_DIR, "uploads"
 REPLENISHMENT_DIR = (UPLOAD_DIR / "replenishment").resolve()
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-async def _upload_bytes(image: UploadFile) -> bytes:
+def _inference_upload(image: UploadFile) -> UploadFile:
     if not image.filename:
         raise HTTPException(status_code=422, detail="Image file is required")
-    data = await image.read(MAX_IMAGE_BYTES + 1)
-    if len(data) > MAX_IMAGE_BYTES:
-        raise HTTPException(status_code=413, detail="Image file is too large")
-    if not data:
+    image.file.seek(0, os.SEEK_END)
+    size = image.file.tell()
+    image.file.seek(0)
+    if not size:
         raise HTTPException(status_code=422, detail="Image file is empty")
-    return data
+    return image
 
 
 @app.get("/")
@@ -131,10 +131,7 @@ async def create_embedding(
     w: int = Form(...),
     h: int = Form(...),
 ):
-    return await call_ml(
-        "/v1/embeddings", await _upload_bytes(image), image.filename,
-        image.content_type, {"x": x, "y": y, "w": w, "h": h},
-    )
+    return await call_ml("/v1/embeddings", _inference_upload(image), {"x": x, "y": y, "w": w, "h": h})
 
 
 @app.post("/v1/search", response_model=SearchResponse)
@@ -158,10 +155,7 @@ async def search_matches(
     form = {"x": x, "y": y, "w": w, "h": h, "topk": topk}
     if gallery_id:
         form["gallery_id"] = gallery_id
-    return await call_ml(
-        "/v1/search", await _upload_bytes(image), image.filename,
-        image.content_type, form,
-    )
+    return await call_ml("/v1/search", _inference_upload(image), form)
 
 
 async def _finish_gallery_import(gallery_id: str, job_id: str) -> None:

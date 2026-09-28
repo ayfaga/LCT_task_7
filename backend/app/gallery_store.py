@@ -7,25 +7,27 @@ embedding archives into the same volume; uploaded images are never removed.
 from __future__ import annotations
 
 import csv
+import errno
 import io
 import json
 import os
 import re
+import shutil
 from pathlib import Path, PurePosixPath
+from tempfile import TemporaryDirectory
 from threading import Lock
 from uuid import uuid4
 from zipfile import BadZipFile, ZipFile
 
 from fastapi import HTTPException, UploadFile
 from PIL import Image, UnidentifiedImageError
+from starlette.concurrency import run_in_threadpool
 
 
-MAX_IMAGE_BYTES = 20 * 1024 * 1024
-MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
-MAX_TOTAL_BYTES = 200 * 1024 * 1024
-MAX_IMAGES_PER_IMPORT = 200
-MAX_GALLERY_IMAGES = 1000
 MAX_PIXELS = 50_000_000
+COPY_CHUNK_BYTES = 1024 * 1024
+DISK_RESERVE_BYTES = 256 * 1024 * 1024
+PREVIEW_IMAGES = 100
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 GALLERY_ID_RE = re.compile(r"[0-9a-f]{32}\Z")
 COMMON_GALLERY_ID = "00000000000000000000000000000001"
@@ -58,15 +60,17 @@ def read_gallery(gallery_id: str) -> dict:
 
 def public_gallery(meta: dict) -> dict:
     gallery_id = meta["gallery_id"]
+    image_count = len(meta["images"])
     images = [
         {"gallery_id": row["gallery_id"], "filename": row["filename"],
          "image_url": f"/api/galleries/{gallery_id}/images/{row['image_key']}"}
-        for row in meta["images"]
+        for row in meta["images"][-PREVIEW_IMAGES:]
     ]
     return {
         "gallery_id": gallery_id, "name": meta["name"], "state": meta["state"],
-        "image_count": len(images), "minimum_for_search": 10,
-        "search_ready": bool(meta.get("gallery_file") and len(images) >= 10),
+        "image_count": image_count, "images_truncated": image_count > PREVIEW_IMAGES,
+        "minimum_for_search": 10,
+        "search_ready": bool(meta.get("gallery_file") and image_count >= 10),
         "processed": meta.get("processed", 0),
         "pending_count": len(meta.get("pending", [])), "error": meta.get("error"),
         "images": images,
@@ -131,13 +135,11 @@ def _clean_filename(name: str) -> str:
     return str(path)
 
 
-def _valid_image(name: str, data: bytes) -> tuple[int, int]:
-    if len(data) > MAX_IMAGE_BYTES:
-        raise HTTPException(status_code=413, detail=f"Image {name} exceeds 20 MiB")
+def _valid_image(name: str, path: Path) -> tuple[int, int]:
     if Path(name).suffix.lower() not in IMAGE_EXTENSIONS:
         raise HTTPException(status_code=422, detail=f"Unsupported image: {name}")
     try:
-        with Image.open(io.BytesIO(data)) as image:
+        with Image.open(path) as image:
             if image.format not in {"JPEG", "PNG"} or image.width * image.height > MAX_PIXELS:
                 raise ValueError("Unsupported image or dimensions")
             image.load()
@@ -146,50 +148,56 @@ def _valid_image(name: str, data: bytes) -> tuple[int, int]:
         raise HTTPException(status_code=422, detail=f"Invalid image: {name}") from exc
 
 
-def _parse_manifest(data: bytes | None) -> dict[str, dict]:
-    if data is None:
+def _parse_manifest(source) -> dict[str, dict]:
+    if source is None:
         return {}
-    if len(data) > 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Manifest exceeds 1 MiB")
     try:
-        rows = csv.DictReader(io.StringIO(data.decode("utf-8-sig")))
-        if not rows.fieldnames or "filename" not in rows.fieldnames:
-            raise ValueError("Manifest needs a filename column")
-        result = {}
-        for row in rows:
-            filename = _clean_filename((row.get("filename") or "").strip())
-            if filename in result:
-                raise ValueError("Duplicate manifest filename")
-            result[filename] = row
-        return result
-    except (UnicodeDecodeError, ValueError) as exc:
+        with io.TextIOWrapper(source, encoding="utf-8-sig", newline="") as text:
+            rows = csv.DictReader(text)
+            if not rows.fieldnames or "filename" not in rows.fieldnames:
+                raise ValueError("Manifest needs a filename column")
+            result = {}
+            for row in rows:
+                filename = _clean_filename((row.get("filename") or "").strip())
+                if filename in result:
+                    raise ValueError("Duplicate manifest filename")
+                result[filename] = row
+            return result
+    except (UnicodeDecodeError, ValueError, csv.Error) as exc:
         raise HTTPException(status_code=422, detail=f"Invalid manifest: {exc}") from exc
 
 
-async def _read_upload(upload: UploadFile, limit: int) -> bytes:
-    data = await upload.read(limit + 1)
-    if len(data) > limit:
-        raise HTTPException(status_code=413, detail=f"Upload exceeds {limit // (1024 * 1024)} MiB")
-    return data
+def _copy_stream(source, destination: Path) -> None:
+    """Copy a single member without accumulating the archive or images in RAM."""
+    try:
+        with destination.open("wb") as output:
+            while chunk := source.read(COPY_CHUNK_BYTES):
+                if shutil.disk_usage(destination.parent).free < len(chunk) + DISK_RESERVE_BYTES:
+                    raise HTTPException(status_code=507, detail="Not enough free disk space for gallery upload")
+                output.write(chunk)
+    except OSError as exc:
+        if exc.errno == errno.ENOSPC:
+            raise HTTPException(status_code=507, detail="Not enough free disk space for gallery upload") from exc
+        raise
 
 
-async def _uploaded_images(images: list[UploadFile] | None, archive: UploadFile | None,
-                           manifest: UploadFile | None) -> list[tuple[str, bytes, dict]]:
+def _uploaded_images(images: list[UploadFile] | None, archive: UploadFile | None,
+                     manifest: UploadFile | None, scratch: Path) -> list[tuple[str, Path, dict]]:
     if bool(images) == bool(archive):
         raise HTTPException(status_code=422, detail="Supply images or one ZIP archive")
-    raw: list[tuple[str, bytes]] = []
+    raw: list[tuple[str, Path]] = []
     internal_manifest = None
+    if manifest:
+        manifest.file.seek(0)
+    external_manifest = _parse_manifest(manifest.file) if manifest else None
     if archive:
         if Path(archive.filename or "").suffix.lower() != ".zip":
             raise HTTPException(status_code=422, detail="Archive must be ZIP")
-        compressed = await _read_upload(archive, MAX_ARCHIVE_BYTES)
+        archive.file.seek(0)
         try:
-            with ZipFile(io.BytesIO(compressed)) as zipped:
-                entries = zipped.infolist()
-                if len(entries) > MAX_IMAGES_PER_IMPORT + 20:
-                    raise HTTPException(status_code=413, detail="Too many ZIP entries")
-                total = 0
-                for entry in entries:
+            with ZipFile(archive.file) as zipped:
+                selected = []
+                for entry in zipped.infolist():
                     if entry.is_dir() or entry.filename.startswith("__MACOSX/"):
                         continue
                     filename = _clean_filename(entry.filename)
@@ -198,44 +206,46 @@ async def _uploaded_images(images: list[UploadFile] | None, archive: UploadFile 
                     if entry.flag_bits & 1 or (entry.external_attr >> 16) & 0o170000 == 0o120000:
                         raise HTTPException(status_code=422, detail="Encrypted files and links are unsupported")
                     if filename == "manifest.csv":
-                        if internal_manifest is not None or entry.file_size > 1024 * 1024:
+                        if internal_manifest is not None:
                             raise HTTPException(status_code=422, detail="Invalid ZIP manifest")
-                        internal_manifest = zipped.read(entry)
+                        with zipped.open(entry) as source:
+                            internal_manifest = _parse_manifest(source)
                         continue
                     if Path(filename).suffix.lower() not in IMAGE_EXTENSIONS:
                         raise HTTPException(status_code=422, detail=f"Unsupported ZIP entry: {filename}")
-                    total += entry.file_size
-                    if entry.file_size > MAX_IMAGE_BYTES or total > MAX_TOTAL_BYTES:
-                        raise HTTPException(status_code=413, detail="ZIP images exceed size limit")
-                    raw.append((filename, zipped.read(entry)))
-        except BadZipFile as exc:
+                    selected.append((filename, entry))
+                if external_manifest is not None and internal_manifest is not None:
+                    raise HTTPException(status_code=422, detail="Supply one manifest only")
+                manifest_rows = external_manifest if external_manifest is not None else (internal_manifest or {})
+                _validate_manifest_names(manifest_rows, [name for name, _ in selected],
+                                         external_manifest is not None or internal_manifest is not None)
+                for filename, entry in selected:
+                    path = scratch / uuid4().hex
+                    with zipped.open(entry) as source:
+                        _copy_stream(source, path)
+                    raw.append((filename, path))
+        except (BadZipFile, EOFError, RuntimeError) as exc:
             raise HTTPException(status_code=422, detail="Invalid ZIP archive") from exc
     else:
-        if len(images) > MAX_IMAGES_PER_IMPORT:
-            raise HTTPException(status_code=413, detail="Too many images")
-        total = 0
+        manifest_rows = external_manifest or {}
+        _validate_manifest_names(manifest_rows, [_clean_filename(image.filename or "") for image in images],
+                                 external_manifest is not None)
         for image in images:
             filename = _clean_filename(image.filename or "")
-            data = await _read_upload(image, MAX_IMAGE_BYTES)
-            total += len(data)
-            if total > MAX_TOTAL_BYTES:
-                raise HTTPException(status_code=413, detail="Images exceed 200 MiB")
-            raw.append((filename, data))
-    if not raw or len(raw) > MAX_IMAGES_PER_IMPORT:
-        raise HTTPException(status_code=422, detail="Supply 1–200 JPEG/PNG images")
-    if manifest and internal_manifest is not None:
-        raise HTTPException(status_code=422, detail="Supply one manifest only")
-    manifest_rows = _parse_manifest(await _read_upload(manifest, 1024 * 1024) if manifest else internal_manifest)
-    if manifest_rows and set(manifest_rows) != {filename for filename, _ in raw}:
-        raise HTTPException(status_code=422, detail="Manifest filenames must match uploaded images")
+            image.file.seek(0)
+            path = scratch / uuid4().hex
+            _copy_stream(image.file, path)
+            raw.append((filename, path))
+    if not raw:
+        raise HTTPException(status_code=422, detail="Supply JPEG/PNG images")
     result = []
     seen_filenames = set()
     seen_ids = set()
-    for filename, data in raw:
+    for filename, path in raw:
         if filename in seen_filenames:
             raise HTTPException(status_code=422, detail=f"Duplicate filename: {filename}")
         seen_filenames.add(filename)
-        width, height = _valid_image(filename, data)
+        width, height = _valid_image(filename, path)
         row = manifest_rows.get(filename, {})
         label = (row.get("gallery_id") or PurePosixPath(filename).stem).strip()
         if not label or len(label) > 128 or label in seen_ids:
@@ -252,27 +262,45 @@ async def _uploaded_images(images: list[UploadFile] | None, archive: UploadFile 
             bbox = [x, y, w, h]
         else:
             bbox = [0, 0, width, height]
-        result.append((filename, data, {"gallery_id": label, "bbox": bbox}))
+        result.append((filename, path, {"gallery_id": label, "bbox": bbox}))
     return result
+
+
+def _validate_manifest_names(rows: dict[str, dict], filenames: list[str], required: bool) -> None:
+    if len(set(filenames)) != len(filenames):
+        raise HTTPException(status_code=422, detail="Duplicate image filename in upload")
+    if required and set(rows) != set(filenames):
+        missing = sorted(set(filenames) - set(rows))[:3]
+        extra = sorted(set(rows) - set(filenames))[:3]
+        raise HTTPException(status_code=422, detail=f"Manifest filenames must match uploaded images; missing={missing}, extra={extra}. Include ZIP paths such as images/car.jpg")
 
 
 async def stage_import(gallery_id: str, images: list[UploadFile] | None,
                        archive: UploadFile | None, manifest: UploadFile | None) -> dict:
-    incoming = await _uploaded_images(images, archive, manifest)
+    return await run_in_threadpool(_stage_import_sync, gallery_id, images, archive, manifest)
+
+
+def _stage_import_sync(gallery_id: str, images: list[UploadFile] | None,
+                       archive: UploadFile | None, manifest: UploadFile | None) -> dict:
+    folder = gallery_dir(gallery_id)
+    with TemporaryDirectory(prefix=".upload-", dir=folder) as temporary:
+        incoming = _uploaded_images(images, archive, manifest, Path(temporary))
+        return _commit_import(gallery_id, incoming)
+
+
+def _commit_import(gallery_id: str, incoming: list[tuple[str, Path, dict]]) -> dict:
     with _write_lock:
         meta = read_gallery(gallery_id)
         if meta["state"] == "building":
             raise HTTPException(status_code=409, detail="Gallery import is already running")
-        if len(meta["images"]) + len(incoming) > MAX_GALLERY_IMAGES:
-            raise HTTPException(status_code=413, detail="Gallery exceeds 1000 images")
         existing_ids = {row["gallery_id"] for row in meta["images"]}
         if existing_ids & {record["gallery_id"] for _, _, record in incoming}:
             raise HTTPException(status_code=409, detail="Gallery ID already exists")
         folder = gallery_dir(gallery_id)
         pending = []
-        for filename, data, record in incoming:
+        for filename, path, record in incoming:
             image_key = uuid4().hex + Path(filename).suffix.lower()
-            (folder / "images" / image_key).write_bytes(data)
+            os.replace(path, folder / "images" / image_key)
             pending.append({**record, "filename": filename, "image_key": image_key})
         meta.update(state="building", pending=pending, processed=0,
                     job_id=uuid4().hex, error=None)

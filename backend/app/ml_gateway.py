@@ -6,7 +6,7 @@ import os
 import logging
 
 import httpx
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
@@ -28,18 +28,16 @@ async def get_ml_ready() -> dict:
     return response.json()
 
 
-async def call_ml(path: str, data: bytes, filename: str, content_type: str | None,
-                  form: dict[str, int | str]) -> dict:
-    if not filename or not data:
+async def call_ml(path: str, image: UploadFile, form: dict[str, int | str]) -> dict:
+    if not image.filename:
         raise HTTPException(status_code=422, detail="Image file is required")
-    if len(data) > MAX_IMAGE_BYTES:
-        raise HTTPException(status_code=413, detail="Image file is too large")
+    image.file.seek(0)
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=3.0)) as client:
             response = await client.post(
                 f"{ml_url()}{path}",
                 data=form,
-                files={"image": (filename, data, content_type or "application/octet-stream")},
+                files={"image": (image.filename, image.file, image.content_type or "application/octet-stream")},
             )
     except httpx.RequestError as exc:
         raise HTTPException(status_code=503, detail="ML service is unavailable") from exc

@@ -47,18 +47,20 @@ class GalleryDatabase:
         ids = np.asarray(ids).astype(str)
         vectors = np.asarray(vectors, dtype=np.float32)
         if (not namespace or vectors.ndim != 2 or vectors.shape != (len(ids), 1024)
-                or not len(ids) or not np.isfinite(vectors).all()
-                or len(set(ids)) != len(ids)
-                or not np.allclose(np.linalg.norm(vectors, axis=1), 1, atol=1e-4)):
+                or not len(ids) or len(set(ids)) != len(ids)):
             raise ValueError("Invalid gallery vectors or IDs")
+        for start in range(0, len(ids), 4096):
+            batch = vectors[start:start + 4096]
+            if not np.isfinite(batch).all() or not np.allclose(np.linalg.norm(batch, axis=1), 1, atol=1e-4):
+                raise ValueError("Invalid gallery vectors or IDs")
         if metadata is None:
             metadata = [{} for _ in ids]
         if len(metadata) != len(ids) or any(not isinstance(row, dict) for row in metadata):
             raise ValueError("Gallery metadata length/type mismatch")
-        rows = [(namespace, offset, str(identity),
+        rows = ((namespace, offset, str(identity),
                  np.asarray(vector, dtype="<f4").tobytes(),
                  json.dumps(meta, ensure_ascii=False, sort_keys=True))
-                for offset, (identity, vector, meta) in enumerate(zip(ids, vectors, metadata))]
+                for offset, (identity, vector, meta) in enumerate(zip(ids, vectors, metadata)))
         with self._lock, self._connect() as db:
             try:
                 db.execute("BEGIN IMMEDIATE")

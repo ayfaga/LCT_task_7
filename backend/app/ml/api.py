@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 import logging
 import os
 from threading import Lock
@@ -19,7 +18,6 @@ from .runtime import GalleryNotReady, MLRuntime
 
 logger = logging.getLogger(__name__)
 app = FastAPI(title="LCT Vehicle ReID ML", version="1.0.0")
-MAX_IMAGE_BYTES = 20 * 1024 * 1024
 
 
 class GalleryBuildRequest(BaseModel):
@@ -70,30 +68,20 @@ def _bbox(x: int, y: int, w: int, h: int) -> tuple[int, int, int, int]:
     return value.x, value.y, value.w, value.h
 
 
-def _decode_image(data: bytes) -> Image.Image:
-    if not data:
-        raise HTTPException(status_code=422, detail="Image file is empty")
-    if len(data) > MAX_IMAGE_BYTES:
-        raise HTTPException(status_code=413, detail="Image file is too large")
+def _decode_image(upload: UploadFile) -> Image.Image:
+    if not upload.filename:
+        raise HTTPException(status_code=422, detail="Image file is required")
+    upload.file.seek(0)
     try:
-        with Image.open(io.BytesIO(data)) as image:
+        with Image.open(upload.file) as image:
             if image.format not in {"JPEG", "PNG"}:
                 raise HTTPException(status_code=422, detail="Only JPEG and PNG are supported")
             if image.width * image.height > 50_000_000:
                 raise HTTPException(status_code=413, detail="Image dimensions are too large")
             image.load()
-            return image.copy()
+            return image
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         raise HTTPException(status_code=422, detail="Invalid image file") from exc
-
-
-def _image_bytes(upload: UploadFile) -> bytes:
-    if not upload.filename:
-        raise HTTPException(status_code=422, detail="Image file is required")
-    data = upload.file.read(MAX_IMAGE_BYTES + 1)
-    if len(data) > MAX_IMAGE_BYTES:
-        raise HTTPException(status_code=413, detail="Image file is too large")
-    return data
 
 
 @app.get("/health")
@@ -125,7 +113,7 @@ def embedding(
     w: int = Form(...), h: int = Form(...),
 ):
     bbox = _bbox(x, y, w, h)
-    source = _decode_image(_image_bytes(image))
+    source = _decode_image(image)
     runtime = _runtime()
     try:
         vector = runtime.embed(source, bbox)
@@ -150,7 +138,7 @@ def search(
     if not 1 <= topk <= 100:
         raise HTTPException(status_code=422, detail="topk must be between 1 and 100")
     bbox = _bbox(x, y, w, h)
-    source = _decode_image(_image_bytes(image))
+    source = _decode_image(image)
     runtime = _runtime(require_gallery=gallery_id is None)
     try:
         vector = runtime.embed(source, bbox)

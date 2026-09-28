@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 import app.main as backend_module
-from app.gallery_store import COMMON_GALLERY_ID
+from app.gallery_store import COMMON_GALLERY_ID, public_gallery
 from app.ml.runtime import MLRuntime
 from app.ml.gallery_db import GalleryDatabase
 
@@ -38,6 +38,9 @@ def fake_runtime(folder: Path) -> MLRuntime:
     runtime.model_sha256 = "test-sha"
     runtime.gallery_ids = None
     runtime.gallery_embeddings = None
+    from threading import Lock
+    runtime._gallery_cache_lock = Lock()
+    runtime._gallery_cache = {}
     runtime.policy = SimpleNamespace(
         cosine_threshold=0.394,
         accepted=lambda scores: np.ones((1, 10), dtype=bool),
@@ -121,6 +124,56 @@ def test_one_common_gallery_is_shared_and_get_does_not_create_it(tmp_path, monke
     shared = client.get("/api/common-gallery").json()
     assert shared["image_count"] == 10 and shared["search_ready"]
     assert client.get("/api/common-gallery").json()["gallery_id"] == COMMON_GALLERY_ID
+
+
+def test_common_gallery_accepts_zip_and_separate_bbox_csv_with_nested_paths(tmp_path, monkeypatch):
+    monkeypatch.setenv("LCT_GALLERY_STATE_DIR", str(tmp_path))
+    runtime = fake_runtime(tmp_path)
+
+    async def build(gallery_id, job_id):
+        return runtime.build_gallery(gallery_id, job_id)
+
+    monkeypatch.setattr(backend_module, "build_ml_gallery", build)
+    names = [f"images/car{i}.png" for i in range(1, 11)]
+    manifest = "filename,gallery_id,x,y,w,h\n" + "".join(
+        f"{name},id{i},0,0,20,20\n" for i, name in enumerate(names, 1)
+    )
+    response = TestClient(backend_module.app).post(
+        "/api/common-gallery/images",
+        files={
+            "archive": ("frames.zip", archive({name: photo(i) for i, name in enumerate(names, 1)}), "application/zip"),
+            "manifest": ("gallery_bbox.csv", manifest.encode(), "text/csv"),
+        },
+    )
+    assert response.status_code == 202, response.text
+    meta = TestClient(backend_module.app).get("/api/common-gallery").json()
+    assert meta["search_ready"] and meta["image_count"] == 10
+    assert {row["gallery_id"] for row in meta["images"]} == {f"id{i}" for i in range(1, 11)}
+
+
+def test_empty_supplied_manifest_never_falls_back_to_whole_frames(tmp_path, monkeypatch):
+    monkeypatch.setenv("LCT_GALLERY_STATE_DIR", str(tmp_path))
+    response = TestClient(backend_module.app).post(
+        "/api/common-gallery/images",
+        files={
+            "archive": ("frames.zip", archive({"images/car1.png": photo(1)}), "application/zip"),
+            "manifest": ("gallery_bbox.csv", b"filename,gallery_id,x,y,w,h\n", "text/csv"),
+        },
+    )
+    assert response.status_code == 422
+    assert "missing=" in response.json()["detail"]
+
+
+def test_large_gallery_status_uses_total_count_and_bounded_preview():
+    meta = {
+        "gallery_id": COMMON_GALLERY_ID, "name": "shared", "state": "ready",
+        "gallery_file": "gallery_0001.npz", "pending": [],
+        "images": [{"gallery_id": str(i), "filename": f"car{i}.jpg", "image_key": f"key{i}.jpg"}
+                   for i in range(101)],
+    }
+    info = public_gallery(meta)
+    assert info["image_count"] == 101 and info["search_ready"]
+    assert info["images_truncated"] and len(info["images"]) == 100
 
 
 def test_rejects_unsafe_or_incomplete_archives(tmp_path, monkeypatch):

@@ -106,7 +106,7 @@ def test_validation_is_preserved_across_boundary(connected_services):
     assert request("/api/identify", data={"x": 100, "y": 20, "w": 400, "h": 300, "topk": 101}).status_code == 422
     assert request("/api/identify", payload=b"not an image").status_code == 422
     assert request("/api/identify", payload=b"").status_code == 422
-    assert request("/api/identify", payload=b"x" * (ml_api.MAX_IMAGE_BYTES + 1)).status_code == 413
+    assert request("/api/identify", payload=b"x" * 1024).status_code == 422
 
 
 def test_unready_ml_service_yields_503(connected_services, monkeypatch):

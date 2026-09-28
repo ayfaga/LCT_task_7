@@ -50,6 +50,8 @@ class MLRuntime:
         # A single worker may receive several requests in FastAPI's threadpool.
         # Serializing large ViT forwards bounds activation memory on CPU/GPU.
         self._inference_lock = Lock()
+        self._gallery_cache_lock = Lock()
+        self._gallery_cache: dict[str, tuple[int, tuple[np.ndarray, np.ndarray]]] = {}
         self.encoder = E2Encoder(
             artifact_dir / model_manifest["model_file"],
             model_manifest["model_sha256"], device=device,
@@ -107,15 +109,21 @@ class MLRuntime:
             raise GalleryNotReady("Add at least ten gallery images")
         if not re.fullmatch(r"gallery_[0-9]{4,}.npz", filename):
             raise ValueError("Invalid gallery archive name")
-        namespace = f"user:{gallery_id}"
-        stored = self.gallery_db.load(namespace, self.model_version, self.model_sha256)
-        expected_ids = [row["gallery_id"] for row in meta["images"]]
-        if stored is None or list(map(str, stored[0])) != expected_ids:
-            ids, vectors = self._read_gallery(folder / filename)
-            self.gallery_db.replace(namespace, ids, vectors, self.model_version,
-                                    self.model_sha256, meta["images"])
+        generation = int(meta["generation"])
+        with self._gallery_cache_lock:
+            cached = self._gallery_cache.get(gallery_id)
+            if cached is not None and cached[0] == generation:
+                return cached[1]
+            namespace = f"user:{gallery_id}"
             stored = self.gallery_db.load(namespace, self.model_version, self.model_sha256)
-        return stored
+            expected_ids = [row["gallery_id"] for row in meta["images"]]
+            if stored is None or list(map(str, stored[0])) != expected_ids:
+                ids, vectors = self._read_gallery(folder / filename)
+                self.gallery_db.replace(namespace, ids, vectors, self.model_version,
+                                        self.model_sha256, meta["images"])
+                stored = self.gallery_db.load(namespace, self.model_version, self.model_sha256)
+            self._gallery_cache[gallery_id] = generation, stored
+            return stored
 
     def build_gallery(self, gallery_id: str, job_id: str) -> dict:
         folder = self._custom_folder(gallery_id)
@@ -142,7 +150,7 @@ class MLRuntime:
             vectors.append(vector)
             meta["processed"] = offset
             self._write_meta(folder, meta)
-        if len(set(ids)) != len(ids) or len(ids) > 1000:
+        if len(set(ids)) != len(ids):
             raise ValueError("Invalid gallery ID set")
         # A prior worker can finish the archive write and then die before the
         # metadata switch. Preserve that archive and choose a fresh generation.

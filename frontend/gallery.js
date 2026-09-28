@@ -51,11 +51,9 @@ function validateSelection() {
   const archive = galleryArchive.files[0];
   const manifest = galleryManifest.files[0];
   if (Boolean(images.length) === Boolean(archive)) throw new Error('Выберите либо фотографии, либо один ZIP-архив.');
-  if (images.length > 200) throw new Error('В одной партии не более 200 изображений.');
-  if (images.some((file) => !/\.(jpe?g|png)$/i.test(file.name) || file.size > 20 * 1024 * 1024)) throw new Error('Каждое изображение должно быть JPG/PNG размером до 20 МиБ.');
-  if (images.reduce((sum, file) => sum + file.size, 0) > 200 * 1024 * 1024) throw new Error('Размер партии не должен превышать 200 МиБ.');
-  if (archive && (archive.size > 100 * 1024 * 1024 || !/\.zip$/i.test(archive.name))) throw new Error('Нужен ZIP размером до 100 МиБ.');
-  if (manifest && (manifest.size > 1024 * 1024 || !/\.csv$/i.test(manifest.name))) throw new Error('Нужен CSV размером до 1 МиБ.');
+  if (images.some((file) => !/\.(jpe?g|png)$/i.test(file.name))) throw new Error('Каждое изображение должно быть JPG/PNG.');
+  if (archive && !/\.zip$/i.test(archive.name)) throw new Error('Нужен ZIP-архив.');
+  if (manifest && !/\.csv$/i.test(manifest.name)) throw new Error('Нужен CSV-файл.');
   if (images.length && manifest) {
     const names = images.map((file) => file.name);
     if (new Set(names).size !== names.length) throw new Error('Имена изображений в партии не должны повторяться.');
@@ -98,7 +96,7 @@ async function normalizeManifest(file, images, archive) {
   if (!headers.includes('image_id') || ['x', 'y', 'w', 'h'].some((key) => !headers.includes(key))) {
     throw new Error('BBox CSV должен содержать image_id,x,y,w,h или filename,gallery_id,x,y,w,h.');
   }
-  if (archive) throw new Error('Для ZIP нужен manifest.csv с колонкой filename. Для CSV организатора выберите отдельные JPG-файлы.');
+  if (archive) throw new Error('Для ZIP нужен CSV с колонкой filename и путями файлов внутри архива.');
   const position = Object.fromEntries(headers.map((name, index) => [name, index]));
   const used = new Set();
   const lines = ['filename,gallery_id,x,y,w,h'];
