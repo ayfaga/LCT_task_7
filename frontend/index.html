@@ -3,28 +3,53 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ЛЦТ Команда "Мечты"</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <title>Поиск автомобилей · ЛЦТ</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
-  <body>
-    <div class="page-shell landing-shell">
-      <header class="hero landing-hero">
-        <div class="hero-content hero-content-compact">
-          <p class="eyebrow">Лидеры цифровой трансформации 2026 - команда "Мечты"</p>
-          <h1>Поиск автомобиля по фотографии</h1>
-          <p class="subtitle">Сначала подготовьте галерею, затем проверьте одно изображение или целую группу. Для исходных кадров указывайте BBox автомобиля.</p>
+  <body class="home-page">
+    <div class="home-shell">
+      <nav class="home-nav" aria-label="Навигация">
+        <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◈</span><span>ФАЛЬКОН <small>Поиск автомобилей</small></span></a>
+        <span class="nav-caption">ЛЦТ 2026 · команда «Мечты»</span>
+      </nav>
+
+      <header class="home-hero">
+        <div class="home-hero-copy">
+          <span class="home-kicker">VEHICLE RE-IDENTIFICATION</span>
+          <h1>Один поиск.<br><em>Любой формат запроса.</em></h1>
+          <p>Сначала наполните общую галерею автомобилей. Затем ищите совпадения по одному кадру или сразу по группе изображений.</p>
+        </div>
+        <div class="home-flow" aria-label="Как это работает">
+          <div><span>01</span><strong>Галерея</strong><small>База для поиска</small></div>
+          <b aria-hidden="true">→</b>
+          <div><span>02</span><strong>Запрос</strong><small>Один или группа</small></div>
+          <b aria-hidden="true">→</b>
+          <div><span>03</span><strong>Результат</strong><small>Похожие авто</small></div>
         </div>
       </header>
 
-      <main class="main-content landing-grid">
-        <a class="landing-card" href="/gallery"><span class="flow-number">01 · База поиска</span><span class="card-glyph" aria-hidden="true">▤</span><strong>Загрузить галерею</strong><span class="card-description">Добавьте фотографии автомобилей. Для полных кадров приложите CSV с BBox — после индексации они станут доступны поиску.</span><span class="card-action">Открыть галерею →</span></a>
-        <a class="landing-card" href="/many"><span class="flow-number">02 · Пакетный поиск</span><span class="card-glyph" aria-hidden="true">▦</span><strong>Изображения + BBox CSV</strong><span class="card-description">Загрузите группу запросов и таблицу image_id, x, y, w, h. Получите результаты для каждого кадра.</span><span class="card-action">Открыть пакетный поиск →</span></a>
-        <a class="landing-card" href="/solo"><span class="flow-number">03 · Быстрая проверка</span><span class="card-glyph" aria-hidden="true">□</span><strong>Одно изображение</strong><span class="card-description">Загрузите кадр и выделите автомобиль прямоугольником прямо на фотографии.</span><span class="card-action">Открыть ручной поиск →</span></a>
-      </main>
-    </div>
+      <main>
+        <section class="home-gallery-card" aria-labelledby="galleryTitle">
+          <div class="home-gallery-icon" aria-hidden="true">▤</div>
+          <div class="home-gallery-copy">
+            <span class="section-kicker">Шаг 1 · Общая база</span>
+            <h2 id="galleryTitle">Одна галерея для всех запросов</h2>
+            <p>Загрузите фотографии автомобилей один раз. И одиночный, и пакетный поиск будут сравнивать запросы с этой же базой.</p>
+            <div class="home-gallery-state" id="homeGalleryStatus" aria-live="polite">Проверяем состояние галереи…</div>
+          </div>
+          <a class="home-primary-link" href="/gallery">Открыть галерею <span aria-hidden="true">↗</span></a>
+        </section>
 
+        <section class="home-search-section" aria-labelledby="searchTitle">
+          <div class="home-search-heading"><div><span class="section-kicker">Шаг 2 · Выберите способ поиска</span><h2 id="searchTitle">Как хотите проверить автомобиль?</h2></div><p>Оба режима используют общую галерею. Никакой выбор базы не нужен.</p></div>
+          <div class="home-query-grid">
+            <a class="home-query-card" href="/solo"><span class="query-card-icon" aria-hidden="true">□</span><span class="query-card-tag">Быстрый поиск</span><strong>Один снимок</strong><span>Загрузите фотографию и выделите автомобиль рамкой прямо на изображении.</span><b>Искать по одному кадру <span aria-hidden="true">↗</span></b></a>
+            <a class="home-query-card" href="/many"><span class="query-card-icon" aria-hidden="true">▦</span><span class="query-card-tag">Пакетный поиск</span><strong>Группа снимков</strong><span>Загрузите фотографии и CSV с координатами BBox для каждого кадра.</span><b>Искать по группе <span aria-hidden="true">↗</span></b></a>
+          </div>
+        </section>
+      </main>
+      <footer class="home-footer">Совпадения основаны на визуальном сходстве автомобиля; cosine — не вероятность.</footer>
+    </div>
+    <script src="/static/home.js?v=20260929-2"></script>
   </body>
 </html>

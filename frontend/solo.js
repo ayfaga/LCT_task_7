@@ -1,27 +1,28 @@
 const imageInput = document.getElementById('soloImageInput');
 const canvas = document.getElementById('drawingCanvas');
 const stage = document.getElementById('stage');
-const gallerySelect = document.getElementById('soloGallerySelect');
+const galleryStatus = document.getElementById('soloGalleryStatus');
 const analyzeBtn = document.getElementById('analyzeBtn');
 const errorMessage = document.getElementById('errorMessage');
 const bboxReadout = document.getElementById('bboxReadout');
 let imageFile = null, imageUrl = '', imageSize = null, start = null, box = null;
+let commonGallery = null;
 
 const escapeHtml = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 function showError(message) { errorMessage.textContent = message; errorMessage.classList.add('visible'); }
 function clearError() { errorMessage.classList.remove('visible'); }
 
-async function loadGalleryChoices() {
-  const [readyResponse, listResponse] = await Promise.all([fetch('/ready'), fetch('/api/galleries')]);
-  if (!readyResponse.ok || !listResponse.ok) throw new Error('Не удалось загрузить галереи.');
-  const ready = await readyResponse.json(), galleries = await listResponse.json();
-  gallerySelect.replaceChildren();
-  if (ready.gallery_ready) gallerySelect.add(new Option(`Основная (${ready.gallery_size})`, ''));
-  galleries.filter((entry) => entry.search_ready).forEach((entry) => gallerySelect.add(new Option(`${entry.name} (${entry.image_count})`, entry.gallery_id)));
-  gallerySelect.disabled = !gallerySelect.options.length;
-  if (gallerySelect.disabled) gallerySelect.add(new Option('Нет готовой галереи', ''));
+async function loadCommonGallery() {
+  const response = await fetch('/api/common-gallery');
+  if (!response.ok) throw new Error('Не удалось проверить общую галерею.');
+  commonGallery = await response.json();
+  galleryStatus.textContent = commonGallery.search_ready
+    ? `● Общая галерея готова · ${commonGallery.image_count} автомобилей`
+    : `○ В общей галерее ${commonGallery.image_count} автомобилей · нужно минимум ${commonGallery.minimum_for_search || 10}`;
+  renderBox();
 }
-const gallerySelectionReady = loadGalleryChoices().catch((error) => { gallerySelect.replaceChildren(new Option(error.message, '')); gallerySelect.disabled = true; });
+const gallerySelectionReady = loadCommonGallery().catch((error) => { galleryStatus.textContent = error.message; });
+window.addEventListener('focus', () => { loadCommonGallery().catch((error) => { galleryStatus.textContent = error.message; }); });
 
 function renderBox() {
   canvas.querySelector('#selectedBox')?.remove();
@@ -34,7 +35,7 @@ function renderBox() {
     canvas.appendChild(rect);
   }
   bboxReadout.textContent = box && box.w >= 2 && box.h >= 2 ? `BBox: x=${box.x}, y=${box.y}, w=${box.w}, h=${box.h} пикселей` : 'Протяните прямоугольник от одного угла автомобиля до противоположного.';
-  analyzeBtn.disabled = !box || box.w < 2 || box.h < 2;
+  analyzeBtn.disabled = !commonGallery?.search_ready || !box || box.w < 2 || box.h < 2;
 }
 function imagePoint(event) {
   const point = canvas.createSVGPoint(); point.x = event.clientX; point.y = event.clientY;
@@ -97,10 +98,12 @@ function showResult(data) {
 analyzeBtn.addEventListener('click', async () => {
   if (!imageFile || !box || box.w < 2 || box.h < 2) { showError('Сначала выделите автомобиль.'); return; }
   await gallerySelectionReady;
-  if (gallerySelect.disabled) { showError('Нет готовой галереи. Сначала добавьте минимум 10 автомобилей в разделе «Загрузить галерею».'); return; }
+  try { await loadCommonGallery(); }
+  catch (error) { showError(error.message); return; }
+  if (!commonGallery?.search_ready) { showError('Общая галерея ещё не готова. Добавьте минимум 10 автомобилей.'); return; }
   const body = new FormData(); body.append('image', imageFile, imageFile.name);
   Object.entries(box).forEach(([key, value]) => body.append(key, String(value)));
-  body.append('topk', '10'); if (gallerySelect.value) body.append('gallery_id', gallerySelect.value);
+  body.append('topk', '10'); body.append('gallery_id', commonGallery.gallery_id);
   analyzeBtn.disabled = true; analyzeBtn.textContent = 'Ищем совпадения…'; clearError();
   try {
     const response = await fetch('/api/infer', { method: 'POST', body });

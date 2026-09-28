@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 import app.main as backend_module
+from app.gallery_store import COMMON_GALLERY_ID
 from app.ml.runtime import MLRuntime
 from app.ml.gallery_db import GalleryDatabase
 
@@ -94,6 +95,32 @@ def test_upload_files_zip_incremental_build_and_search(tmp_path, monkeypatch):
     assert len(query["ranked"]) == 10
     assert len(query["accepted"]) == 10
     assert json.loads((tmp_path / gallery_id / "meta.json").read_text())["generation"] == 2
+
+
+def test_one_common_gallery_is_shared_and_get_does_not_create_it(tmp_path, monkeypatch):
+    monkeypatch.setenv("LCT_GALLERY_STATE_DIR", str(tmp_path))
+    runtime = fake_runtime(tmp_path)
+
+    async def build(gallery_id, job_id):
+        return runtime.build_gallery(gallery_id, job_id)
+
+    monkeypatch.setattr(backend_module, "build_ml_gallery", build)
+    client = TestClient(backend_module.app)
+    empty = client.get("/api/common-gallery")
+    assert empty.status_code == 200
+    assert empty.json()["gallery_id"] == COMMON_GALLERY_ID
+    assert empty.json()["image_count"] == 0
+    assert not (tmp_path / COMMON_GALLERY_ID).exists()
+
+    upload = client.post(
+        "/api/common-gallery/images",
+        files=[("images", (f"car{i}.png", photo(i), "image/png")) for i in range(1, 11)],
+    )
+    assert upload.status_code == 202, upload.text
+    assert upload.json()["gallery_id"] == COMMON_GALLERY_ID
+    shared = client.get("/api/common-gallery").json()
+    assert shared["image_count"] == 10 and shared["search_ready"]
+    assert client.get("/api/common-gallery").json()["gallery_id"] == COMMON_GALLERY_ID
 
 
 def test_rejects_unsafe_or_incomplete_archives(tmp_path, monkeypatch):
