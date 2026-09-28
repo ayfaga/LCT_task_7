@@ -10,39 +10,40 @@
     <div class="workbench">
       <button class="back-link" id="backHomeBtn" type="button">← Назад</button>
       <div class="page-header">
-        <h1>Одиночная идентификация</h1>
+        <h1>Одно изображение · ручной BBox</h1>
+        <p>Загрузите исходный кадр и выделите автомобиль прямоугольником. Координаты будут рассчитаны автоматически.</p>
       </div>
 
       <div class="upload-box" id="uploadBox">
         <label class="primary-btn small" for="soloImageInput">Загрузить изображение</label>
-        <input id="soloImageInput" class="file-input" type="file" accept="image/*" />
+        <input id="soloImageInput" class="file-input" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" />
       </div>
 
       <div class="stage hidden" id="stage">
         <div class="stage-topbar">
-          <div class="instruction" id="instructionText">Отметьте нажатием контур машины</div>
+          <div class="instruction" id="instructionText">Нажмите и протяните рамку вокруг автомобиля</div>
           <div class="tool-row">
-            <button class="secondary-btn square" id="undoBtn" type="button" aria-label="Отменить" title="Отменить">↶</button>
-            <button class="secondary-btn square" id="redoBtn" type="button" aria-label="Вернуть" title="Вернуть">↷</button>
+            <button class="secondary-btn" id="clearBoxBtn" type="button">Сбросить рамку</button>
           </div>
         </div>
 
         <div class="image-frame">
           <svg id="drawingCanvas" class="drawing-svg" viewBox="0 0 900 620" preserveAspectRatio="xMidYMid meet"></svg>
         </div>
+        <p id="bboxReadout" class="bbox-readout" aria-live="polite">Протяните прямоугольник от одного угла автомобиля до противоположного.</p>
 
         <div class="error-message" id="errorMessage">Некорректное выделение границы. Попробуйте еще раз, пожалуйста</div>
 
-        <div><label for="soloGallerySelect">Галерея:</label> <select id="soloGallerySelect" aria-label="Галерея для поиска"><option value="">Загрузка списка…</option></select></div>
+        <div><label for="soloGallerySelect">Где искать:</label> <select id="soloGallerySelect" aria-label="Галерея для поиска"><option value="">Загрузка списка…</option></select> <a href="/gallery">Добавить галерею</a></div>
 
         <div class="action-bar">
-          <button class="action-btn" id="analyzeBtn" type="button">Проанализировать!</button>
+          <button class="action-btn" id="analyzeBtn" type="button" disabled>Найти совпадения</button>
           <button class="ghost-btn" id="replaceImageBtn" type="button">Загрузить другое</button>
         </div>
       </div>
     </div>
 
     <script src="/static/export.js?v=20260927-1"></script>
-    <script src="/static/solo.js?v=20260927-4"></script>
+    <script src="/static/solo.js?v=20260929-1"></script>
   </body>
 </html>

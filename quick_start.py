@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
 import os
-import shutil
 import socket
 import subprocess
 import sys
@@ -14,7 +11,6 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any
 
 ROOT = Path(__file__).resolve().parent
 BACKEND_DIR = ROOT / "backend"
@@ -63,89 +59,11 @@ def configured_paths() -> tuple[Path, Path | None]:
 
 
 # --------------------------------------------------------------------------- #
-# Автопочинка SHA256
+# Проверка ML-runtime без изменения версии артефактов
 # --------------------------------------------------------------------------- #
 
-def _current_preprocessing_hash() -> str:
-    """Считает актуальный хеш, вызывая ту же функцию, что и runtime.py."""
-    from app.ml import runtime as rt  # type: ignore
-
-    for name in (
-        "_hash_preprocessing",
-        "compute_preprocessing_hash",
-        "preprocessing_hash",
-        "_preprocessing_sha256",
-    ):
-        fn = getattr(rt, name, None)
-        if callable(fn):
-            value = fn()
-            if isinstance(value, bytes):
-                return value.hex()
-            return str(value)
-
-    # Фолбэк: хеш от preprocess.py рядом с runtime.py
-    candidate = Path(rt.__file__).with_name("preprocessing.py")
-    if candidate.is_file():
-        return hashlib.sha256(candidate.read_bytes()).hexdigest()
-
-    raise ArtifactError(
-        "Не удалось найти функцию вычисления хеша в app/ml/runtime.py. "
-        "Добавьте её имя вручную в _current_preprocessing_hash()."
-    )
-
-
-def _replace_hash_recursive(node: Any, keys: tuple[str, ...], new_hash: str) -> bool:
-    if isinstance(node, dict):
-        changed = False
-        for k, v in list(node.items()):
-            if k in keys and isinstance(v, str):
-                if v != new_hash:
-                    print(f"[fix] {k}: {v[:12]}… -> {new_hash[:12]}…", flush=True)
-                    node[k] = new_hash
-                    changed = True
-            else:
-                changed = _replace_hash_recursive(v, keys, new_hash) or changed
-        return changed
-    if isinstance(node, list):
-        return any(_replace_hash_recursive(item, keys, new_hash) for item in node)
-    return False
-
-
-def _patch_artifact_hash(artifact_dir: Path, new_hash: str) -> Path | None:
-    """Ищет в артефактах поле с SHA256 и перезаписывает его (с бэкапом)."""
-    keys = (
-        "preprocessing_sha256",
-        "preprocessing_hash",
-        "preprocess_sha256",
-        "preprocessing_sha",
-    )
-
-    for manifest in artifact_dir.rglob("*.json"):
-        try:
-            data = json.loads(manifest.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            continue
-
-        if _replace_hash_recursive(data, keys, new_hash):
-            backup = manifest.with_suffix(manifest.suffix + ".bak")
-            if not backup.exists():
-                shutil.copy2(manifest, backup)
-            manifest.write_text(json.dumps(data, indent=2), encoding="utf-8")
-            print(f"[fix] Обновлён {manifest} (бэкап: {backup.name})", flush=True)
-            return manifest
-
-    # Хеш может лежать отдельным файлом
-    for sidecar in artifact_dir.rglob("*.sha256"):
-        sidecar.write_text(new_hash, encoding="utf-8")
-        print(f"[fix] Обновлён {sidecar}", flush=True)
-        return sidecar
-
-    return None
-
-
 def verify_ml_runtime_loadable(artifact_dir: Path, gallery_path: Path | None) -> None:
-    """Пробует собрать MLRuntime в текущем процессе, чтобы поймать ошибки
-    (например, SHA256 mismatch) ДО запуска uvicorn."""
+    """Проверяет MLRuntime; несовпадение SHA — ошибка, а не повод менять bundle."""
     if os.environ.get("LCT_SKIP_ML_CHECK") == "1":
         print("[warn] LCT_SKIP_ML_CHECK=1 — preflight ML пропущен.", flush=True)
         return
@@ -158,40 +76,13 @@ def verify_ml_runtime_loadable(artifact_dir: Path, gallery_path: Path | None) ->
     device = os.environ.get("LCT_ML_DEVICE", "cpu")
     gallery_arg = str(gallery_path) if gallery_path else None
 
-    def _try() -> None:
+    try:
         MLRuntime(str(artifact_dir), gallery_arg, device)
-
-    try:
-        _try()
-        print("[ok] ML preflight прошёл.", flush=True)
-        return
     except ValueError as exc:
-        if "SHA256 mismatch" not in str(exc):
-            raise ArtifactError(f"ML runtime не загрузился: {exc}") from exc
-
-    # --- Автопочинка ---
-    print("[fix] SHA256 mismatch — пробую починить автоматически.", flush=True)
-    try:
-        actual = _current_preprocessing_hash()
-    except ArtifactError:
-        raise
+        raise ArtifactError(f"ML runtime не загрузился: {exc}. Проверьте версию кода и артефактов; манифест не менялся.") from exc
     except Exception as exc:
-        raise ArtifactError(f"Не удалось вычислить текущий хеш: {exc}") from exc
-
-    patched = _patch_artifact_hash(artifact_dir, actual)
-    if patched is None:
-        raise ArtifactError(
-            "SHA256 mismatch, но в model_artifacts не нашёл ни JSON-манифеста, "
-            "ни *.sha256. Обновите хеш вручную или запустите с LCT_SKIP_ML_CHECK=1."
-        )
-
-    try:
-        _try()
-    except ValueError as exc:
-        raise ArtifactError(
-            f"После автопатча runtime всё ещё падает: {exc}"
-        ) from exc
-    print("[ok] ML preflight прошёл после автопатча.", flush=True)
+        raise ArtifactError(f"ML runtime не загрузился: {type(exc).__name__}: {exc}") from exc
+    print("[ok] ML preflight прошёл.", flush=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -324,9 +215,9 @@ def main() -> int:
 
     try:
         verify_artifacts(artifact_dir, gallery_path)
-        verify_ml_runtime_loadable(artifact_dir, gallery_path)
         if not args.skip_install:
             install_dependencies()
+        verify_ml_runtime_loadable(artifact_dir, gallery_path)
         start_local_stack(artifact_dir, gallery_path, args.backend_port, args.ml_port)
     except (ArtifactError, RuntimeError, ValueError, KeyboardInterrupt) as exc:
         if not isinstance(exc, KeyboardInterrupt):

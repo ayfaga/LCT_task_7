@@ -3,81 +3,38 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Множественная идентификация</title>
+    <title>Пакетный поиск автомобилей</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
-  <body class="many-page">
-    <div class="workbench">
-      <button class="back-link" id="backHomeBtn" type="button">← Назад</button>
-      <div class="page-header">
-        <h1>Множественная идентификация</h1>
-      </div>
-
-      <p class="subtitle-panel">
-        Загрузите набор изображений и таблицу с колонками: image_id, x, y, w, h. Для каждой строки укажите BBox объекта; ID автомобиля и камеры для инференса не требуются.
-      </p>
-
-      <div class="multi-panel">
-        <div class="file-panel">
-          <h3>Изображения:</h3>
-          <div id="imageList" class="file-list"></div>
-          <button class="add-file-btn" type="button" data-type="image">Добавить</button>
-        </div>
-
-        <div class="file-panel">
-          <h3>Координаты:</h3>
-          <div id="coordList" class="file-list"></div>
-          <div class="bbox-table-preview hidden" id="coordTablePreview"></div>
-          <button class="add-file-btn" type="button" data-type="coord">Добавить</button>
-        </div>
-      </div>
-
-      <div class="multi-footer">
-        <label for="manyGallerySelect">Галерея: <select id="manyGallerySelect" aria-label="Галерея для поиска"><option value="">Загрузка списка…</option></select></label>
-        <button class="ghost-btn" id="archiveUploadBtn" type="button">Загрузить архив</button>
-        <button class="action-btn" id="submitManyBtn" type="button">Отправить!</button>
-      </div>
-      <div class="upload-status hidden" id="archiveStatus" aria-live="polite"></div>
+  <body class="workflow-page">
+    <main class="workflow-shell">
+      <a class="back-link" href="/">← Все действия</a>
+      <header class="workflow-header"><span class="flow-number">02 · Пакетный поиск</span><h1>Изображения + BBox CSV</h1><p>Загрузите исходные фотографии и одну таблицу с координатами машин. Мы сопоставим каждую строку с изображением по <code>image_id</code>.</p></header>
+      <section class="workflow-card">
+        <div class="section-header"><h2>1. Загрузите группу изображений</h2></div>
+        <label class="upload-tile" for="manyImages"><strong>Выбрать JPG/PNG</strong><span>Несколько файлов сразу; они остаются в браузере до запуска поиска</span><input id="manyImages" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" multiple /></label>
+        <p id="manyImagesSummary" class="selection-summary">Изображения не выбраны.</p>
+      </section>
+      <section class="workflow-card">
+        <div class="section-header"><h2>2. Добавьте BBox CSV</h2></div>
+        <p class="workflow-note">Обязательные колонки: <code>image_id,x,y,w,h</code>. Значение <code>image_id</code> — имя файла (например, <code>car01.jpg</code>); координаты — целые пиксели исходного изображения. Одна строка на каждый кадр.</p>
+        <label class="upload-tile" for="manyCsv"><strong>Выбрать CSV</strong><span>Файл с BBox для каждого изображения</span><input id="manyCsv" type="file" accept=".csv,text/csv" /></label>
+        <div id="coordTablePreview" class="bbox-table-preview hidden"></div>
+      </section>
+      <section class="workflow-card">
+        <div class="section-header"><h2>3. Запустите поиск</h2></div>
+        <label for="manyGallerySelect">Где искать</label>
+        <select id="manyGallerySelect"><option value="">Загрузка списка…</option></select>
+        <a class="inline-link" href="/gallery">Добавить галерею</a>
+        <div class="workflow-actions"><button class="action-btn" id="submitManyBtn" type="button">Найти совпадения</button></div>
+        <p id="archiveStatus" class="upload-status" role="status" aria-live="polite"></p>
+      </section>
       <section class="many-results hidden" id="manyResults" aria-live="polite">
-        <h2>Результаты распознавания</h2>
-        <button class="ghost-btn" id="exportManyBtn" type="button">Скачать результаты CSV</button>
+        <div class="section-header"><h2>Результаты поиска</h2><button class="ghost-btn" id="exportManyBtn" type="button">Скачать CSV</button></div>
         <div class="many-results-grid" id="manyResultsGrid"></div>
       </section>
-    </div>
-
-    <div class="modal hidden" id="renameModal" aria-hidden="true">
-      <div class="modal-backdrop" data-close="true"></div>
-      <div class="modal-dialog" role="dialog" aria-modal="true">
-        <div class="modal-header">
-          <h2>Переименование файла</h2>
-          <button class="close-btn" id="renameCloseBtn" aria-label="Закрыть">×</button>
-        </div>
-        <div class="modal-form">
-          <label>
-            Имя
-            <input id="renameInput" type="text" />
-          </label>
-          <div class="extension-row">
-            <span>Расширение:</span>
-            <div class="extension-menu">
-              <button class="extension-trigger" id="extensionTrigger" type="button">png</button>
-              <div class="extension-options" id="extensionOptions"></div>
-            </div>
-          </div>
-          <div class="modal-actions">
-            <button class="ghost-btn" id="cancelRenameBtn" type="button">Отменить</button>
-            <button class="action-btn" id="saveRenameBtn" type="button">Сохранить</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="modal hidden" id="previewModal" aria-hidden="true">
-      <div class="modal-backdrop" data-close="true"></div>
-      <div class="preview-modal-content" id="previewContent"></div>
-    </div>
-
+    </main>
     <script src="/static/export.js?v=20260927-1"></script>
-    <script src="/static/many.js?v=20260927-4"></script>
+    <script src="/static/many.js?v=20260929-1"></script>
   </body>
 </html>

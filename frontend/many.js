@@ -1,269 +1,168 @@
-const imageList = document.getElementById('imageList');
-const coordList = document.getElementById('coordList');
-const coordTablePreview = document.getElementById('coordTablePreview');
-const backHomeBtn = document.getElementById('backHomeBtn');
-const renameModal = document.getElementById('renameModal');
-const previewModal = document.getElementById('previewModal');
-const renameInput = document.getElementById('renameInput');
-const extensionTrigger = document.getElementById('extensionTrigger');
-const previewContent = document.getElementById('previewContent');
-const renameCloseBtn = document.getElementById('renameCloseBtn');
-const cancelRenameBtn = document.getElementById('cancelRenameBtn');
-const saveRenameBtn = document.getElementById('saveRenameBtn');
-const submitManyBtn = document.getElementById('submitManyBtn');
-const archiveUploadBtn = document.getElementById('archiveUploadBtn');
-const archiveStatus = document.getElementById('archiveStatus');
-const manyResults = document.getElementById('manyResults');
-const manyResultsGrid = document.getElementById('manyResultsGrid');
-const exportManyBtn = document.getElementById('exportManyBtn');
+const imageInput = document.getElementById('manyImages');
+const csvInput = document.getElementById('manyCsv');
+const imageSummary = document.getElementById('manyImagesSummary');
+const tablePreview = document.getElementById('coordTablePreview');
 const gallerySelect = document.getElementById('manyGallerySelect');
-let latestResults = [];
+const statusBox = document.getElementById('archiveStatus');
+const submitBtn = document.getElementById('submitManyBtn');
+const resultsPanel = document.getElementById('manyResults');
+const resultsGrid = document.getElementById('manyResultsGrid');
+let rows = [], latestResults = [], activePreviewUrls = [];
+const escapeHtml = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+const stem = (value) => String(value).replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '').toLowerCase();
 
-const TABLE_COLUMNS = ['image_id', 'x', 'y', 'w', 'h'];
-const state = { activeRename: null, fileStore: { image: [], coord: [] } };
+function setStatus(message, kind = 'info') { statusBox.textContent = message; statusBox.className = `upload-status ${kind}`; }
 
 async function loadGalleryChoices() {
-  const [readyResponse, galleriesResponse] = await Promise.all([fetch('/ready'), fetch('/api/galleries')]);
-  if (!readyResponse.ok || !galleriesResponse.ok) throw new Error('Не удалось получить список галерей.');
-  const ready = await readyResponse.json();
-  const galleries = await galleriesResponse.json();
+  const [readyResponse, listResponse] = await Promise.all([fetch('/ready'), fetch('/api/galleries')]);
+  if (!readyResponse.ok || !listResponse.ok) throw new Error('Не удалось загрузить галереи.');
+  const ready = await readyResponse.json(), galleries = await listResponse.json();
   gallerySelect.replaceChildren();
   if (ready.gallery_ready) gallerySelect.add(new Option(`Основная (${ready.gallery_size})`, ''));
-  for (const gallery of galleries.filter((entry) => entry.search_ready)) {
-    gallerySelect.add(new Option(`${gallery.name} (${gallery.image_count})`, gallery.gallery_id));
+  galleries.filter((entry) => entry.search_ready).forEach((entry) => gallerySelect.add(new Option(`${entry.name} (${entry.image_count})`, entry.gallery_id)));
+  gallerySelect.disabled = !gallerySelect.options.length;
+  if (gallerySelect.disabled) gallerySelect.add(new Option('Нет готовой галереи', ''));
+}
+const gallerySelectionReady = loadGalleryChoices().catch((error) => { gallerySelect.replaceChildren(new Option(error.message, '')); gallerySelect.disabled = true; });
+
+function splitCsv(text, delimiter) {
+  const table = []; let row = [], cell = '', quoted = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    if (char === '"') { if (quoted && text[i + 1] === '"') { cell += '"'; i += 1; } else quoted = !quoted; }
+    else if (!quoted && char === delimiter) { row.push(cell.trim()); cell = ''; }
+    else if (!quoted && (char === '\n' || char === '\r')) {
+      if (char === '\r' && text[i + 1] === '\n') i += 1;
+      row.push(cell.trim()); cell = '';
+      if (row.some(Boolean)) table.push(row);
+      row = [];
+    } else cell += char;
   }
-  if (!gallerySelect.options.length) {
-    gallerySelect.add(new Option('Нет готовой галереи', ''));
-    gallerySelect.disabled = true;
-  }
-}
-const gallerySelectionReady = loadGalleryChoices().catch((error) => {
-  gallerySelect.replaceChildren(new Option(error.message, ''));
-  gallerySelect.disabled = true;
-});
-
-const escapeHtml = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
-const fileStem = (name) => String(name || '').replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '').toLowerCase();
-
-function setArchiveStatus(message, kind = 'info') {
-  archiveStatus.className = `upload-status ${kind}`;
-  archiveStatus.textContent = message;
+  if (quoted) throw new Error('В CSV не закрыта кавычка.');
+  row.push(cell.trim()); if (row.some(Boolean)) table.push(row);
+  return table;
 }
 
-function splitDelimitedRow(line, delimiter) {
-  const values = []; let value = ''; let quoted = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i];
-    if (char === '"') {
-      if (quoted && line[i + 1] === '"') { value += '"'; i += 1; } else quoted = !quoted;
-    } else if (char === delimiter && !quoted) { values.push(value.trim()); value = ''; } else value += char;
-  }
-  values.push(value.trim());
-  return values;
-}
-
-function parseCoordinateTable(content) {
-  const trimmed = String(content || '').replace(/^\uFEFF/, '').trim();
-  if (!trimmed) throw new Error('Таблица пуста.');
-  let rows;
-  if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
-    const parsed = JSON.parse(trimmed);
-    rows = Array.isArray(parsed) ? parsed : parsed.rows;
-    if (!Array.isArray(rows)) throw new Error('В JSON должен быть массив строк или поле rows.');
-  } else {
-    const lines = trimmed.split(/\r?\n/).filter((line) => line.trim());
-    const delimiter = lines[0].includes('\t') ? '\t' : lines[0].includes(';') ? ';' : ',';
-    const headers = splitDelimitedRow(lines[0], delimiter).map((header) => header.trim());
-    rows = lines.slice(1).map((line) => {
-      const values = splitDelimitedRow(line, delimiter); const row = {};
-      headers.forEach((header, index) => { row[header] = values[index] ?? ''; });
-      return row;
-    });
-  }
-  const columns = new Set(rows.length ? Object.keys(rows[0]) : []);
-  const missing = TABLE_COLUMNS.filter((column) => !columns.has(column));
-  if (missing.length) throw new Error(`Нужны колонки: ${TABLE_COLUMNS.join(', ')}.`);
-  rows.forEach((row, index) => {
-    ['x', 'y', 'w', 'h'].forEach((key) => {
-      if (!Number.isFinite(Number(row[key]))) throw new Error(`Строка ${index + 2}: «${key}» должно быть числом.`);
-    });
-  });
-  return rows.map((row) => Object.fromEntries(TABLE_COLUMNS.map((key) => [key, String(row[key] ?? '')])));
-}
-
-async function readTable(item) {
-  if (item.rows) return item.rows;
-  const content = item.file ? await item.file.text() : await fetch(item.url).then((response) => {
-    if (!response.ok) throw new Error('Не удалось открыть таблицу.');
-    return response.text();
-  });
-  item.rows = parseCoordinateTable(content);
-  return item.rows;
-}
-
-function makeTableMarkup(name, rows) {
-  const visibleRows = rows.slice(0, 5).map((row) => `<tr>${TABLE_COLUMNS.map((key) => `<td>${escapeHtml(row[key])}</td>`).join('')}</tr>`).join('');
-  const more = rows.length > 5 ? `<p>Показано 5 из ${rows.length} строк.</p>` : '';
-  return `<div class="bbox-table-title">${escapeHtml(name)}</div><div class="bbox-table-scroll"><table><thead><tr>${TABLE_COLUMNS.map((key) => `<th>${key}</th>`).join('')}</tr></thead><tbody>${visibleRows}</tbody></table></div>${more}`;
-}
-
-async function refreshTablePreview() {
-  const item = state.fileStore.coord[0];
-  if (!item) { coordTablePreview.classList.add('hidden'); coordTablePreview.innerHTML = ''; return; }
-  coordTablePreview.classList.remove('hidden'); coordTablePreview.textContent = 'Читаем таблицу…';
-  try { coordTablePreview.innerHTML = makeTableMarkup(item.name, await readTable(item)); }
-  catch (error) { coordTablePreview.textContent = `Ошибка таблицы: ${error.message}`; }
-}
-
-async function loadPersistedFiles() {
-  try {
-    const response = await fetch('/api/replenishment/files');
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const files = await response.json();
-    state.fileStore.image = files.filter((item) => item.kind === 'image').map((item) => ({ id: item.id, name: item.name, kind: 'image', preview: item.url }));
-    state.fileStore.coord = files.filter((item) => item.kind === 'text').map((item) => ({ id: item.id, name: item.name, kind: 'coord', url: item.url }));
-    renderFileList('image'); renderFileList('coord'); refreshTablePreview();
-  } catch (error) { setArchiveStatus(`Не удалось загрузить файлы: ${error.message}`, 'error'); }
-}
-
-function renderFileList(type) {
-  const list = type === 'image' ? imageList : coordList;
-  const items = state.fileStore[type]; list.innerHTML = '';
-  if (!items.length) { list.innerHTML = '<div class="file-name">Файлы не загружены</div>'; return; }
-  items.forEach((item, index) => {
-    const row = document.createElement('div'); row.className = 'file-row clickable-row';
-    row.innerHTML = `<div class="file-name">${escapeHtml(item.name)}</div><div class="file-actions"><button class="file-action-btn" type="button" data-action="preview" title="Открыть">◉</button><button class="file-action-btn" type="button" data-action="rename" title="Переименовать">✎</button><button class="file-action-btn" type="button" data-action="delete" title="Удалить">🗑</button></div>`;
-    row.addEventListener('click', (event) => { const action = event.target.closest('[data-action]')?.dataset.action; if (!action) openPreview(item); else fileAction(type, index, action); });
-    list.appendChild(row);
-  });
-}
-
-async function openPreview(item) {
-  previewContent.innerHTML = '';
-  if (item.kind === 'image') previewContent.innerHTML = `<img src="${item.preview}" alt="${escapeHtml(item.name)}">`;
-  else {
-    previewContent.textContent = 'Читаем таблицу…';
-    try { previewContent.innerHTML = makeTableMarkup(item.name, await readTable(item)); }
-    catch (error) { previewContent.textContent = `Ошибка таблицы: ${error.message}`; }
-  }
-  previewModal.classList.remove('hidden'); previewModal.setAttribute('aria-hidden', 'false');
-}
-
-function closePreview() { previewModal.classList.add('hidden'); previewModal.setAttribute('aria-hidden', 'true'); }
-
-function openRenameModal(type, index) {
-  state.activeRename = { type, index }; const item = state.fileStore[type][index];
-  renameInput.value = item.name.replace(/\.[^.]+$/, ''); extensionTrigger.textContent = item.name.split('.').pop() || '';
-  renameModal.classList.remove('hidden'); renameModal.setAttribute('aria-hidden', 'false');
-}
-function closeRenameModal() { renameModal.classList.add('hidden'); renameModal.setAttribute('aria-hidden', 'true'); state.activeRename = null; }
-async function saveRename() {
-  if (!state.activeRename) return;
-  const { type, index } = state.activeRename; const item = state.fileStore[type][index];
-  const base = renameInput.value.trim(); if (!base) return;
-  const newName = extensionTrigger.textContent ? `${base}.${extensionTrigger.textContent}` : base;
-  try {
-    if (item.id) { const body = new FormData(); body.append('name', newName); const response = await fetch(`/api/replenishment/files/${item.id}`, { method: 'PATCH', body }); if (!response.ok) throw new Error('Не удалось переименовать файл.'); }
-    item.name = newName; closeRenameModal(); renderFileList(type); refreshTablePreview();
-  } catch (error) { setArchiveStatus(error.message, 'error'); }
-}
-async function deleteFile(type, index) {
-  const item = state.fileStore[type][index];
-  if (!confirm(`Удалить «${item.name}»?`)) return;
-  try {
-    if (item.id) { const response = await fetch(`/api/replenishment/files/${item.id}`, { method: 'DELETE' }); if (!response.ok) throw new Error('Не удалось удалить файл.'); }
-    state.fileStore[type].splice(index, 1); renderFileList(type); refreshTablePreview();
-  } catch (error) { setArchiveStatus(error.message, 'error'); }
-}
-function fileAction(type, index, action) { if (action === 'preview') openPreview(state.fileStore[type][index]); if (action === 'rename') openRenameModal(type, index); if (action === 'delete') deleteFile(type, index); }
-
-async function addFiles(type, files) {
-  for (const file of Array.from(files || [])) {
-    if (type === 'image') {
-      if (!file.type.startsWith('image/') && !/\.(png|jpe?g)$/i.test(file.name)) { setArchiveStatus(`«${file.name}» не является изображением.`, 'error'); continue; }
-      state.fileStore.image.unshift({ name: file.name, kind: 'image', preview: URL.createObjectURL(file), file });
-    } else {
-      try { const rows = parseCoordinateTable(await file.text()); state.fileStore.coord.unshift({ name: file.name, kind: 'coord', file, rows }); }
-      catch (error) { setArchiveStatus(`«${file.name}»: ${error.message}`, 'error'); }
+function parseBboxCsv(content) {
+  const text = String(content).replace(/^\uFEFF/, '');
+  const header = text.split(/\r?\n/, 1)[0];
+  const delimiter = header.includes(';') ? ';' : header.includes('\t') ? '\t' : ',';
+  const table = splitCsv(text, delimiter);
+  if (table.length < 2) throw new Error('CSV пуст или не содержит строк с BBox.');
+  const headers = table.shift().map((column) => column.toLowerCase());
+  const required = ['image_id', 'x', 'y', 'w', 'h'];
+  if (required.some((name) => !headers.includes(name))) throw new Error(`Нужны колонки: ${required.join(', ')}.`);
+  const parsed = table.map((cells, index) => {
+    if (cells.length !== headers.length) throw new Error(`Строка ${index + 2}: число колонок не совпадает с заголовком.`);
+    const record = Object.fromEntries(headers.map((name, i) => [name, cells[i]]));
+    if (!record.image_id) throw new Error(`Строка ${index + 2}: image_id пустой.`);
+    const box = {};
+    for (const key of ['x', 'y', 'w', 'h']) {
+      if (!/^-?\d+$/.test(record[key])) throw new Error(`Строка ${index + 2}: ${key} должен быть целым числом.`);
+      box[key] = Number(record[key]);
     }
+    if (box.x < 0 || box.y < 0 || box.w <= 0 || box.h <= 0) throw new Error(`Строка ${index + 2}: BBox должен быть положительным и находиться в кадре.`);
+    return { image_id: record.image_id, ...box };
+  });
+  const names = parsed.map((row) => row.image_id.toLowerCase());
+  if (new Set(names).size !== names.length) throw new Error('В CSV повторяется image_id.');
+  return parsed;
+}
+
+function matchRows(images, table) {
+  const matched = new Map(), used = new Set();
+  for (const file of images) {
+    const name = file.name.toLowerCase();
+    const exact = table.filter((row) => row.image_id.toLowerCase() === name);
+    const candidates = exact.length ? exact : table.filter((row) => stem(row.image_id) === stem(name));
+    if (candidates.length !== 1) throw new Error(`Для «${file.name}» нужна ровно одна строка CSV; найдено ${candidates.length}.`);
+    if (used.has(candidates[0])) throw new Error('Разные файлы сопоставились одной строке CSV. Уточните image_id.');
+    used.add(candidates[0]); matched.set(file, candidates[0]);
   }
-  renderFileList(type); refreshTablePreview();
+  if (used.size !== table.length) throw new Error(`В CSV есть ${table.length - used.size} строк без соответствующих изображений.`);
+  return matched;
 }
 
-document.querySelectorAll('.add-file-btn').forEach((button) => button.addEventListener('click', () => {
-  const type = button.dataset.type === 'image' ? 'image' : 'coord'; const input = document.createElement('input');
-  input.type = 'file'; input.multiple = true; input.accept = type === 'image' ? 'image/*,.png,.jpg,.jpeg' : '.csv,.json,.txt,text/csv,application/json,text/plain';
-  input.addEventListener('change', (event) => addFiles(type, event.target.files)); input.click();
-}));
+function imageDimensions(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    image.onerror = () => reject(new Error('Не удалось открыть изображение.'));
+    image.src = url;
+  });
+}
 
-function normalizedId(value) { return String(value || '').replace(/\\/g, '/').split('/').pop().toLowerCase(); }
-function findRowForImage(rows, item) {
-  const fullName = normalizedId(item.name); const stem = fileStem(item.name);
-  return rows.find((row) => { const id = normalizedId(row.image_id); return id === fullName || fileStem(id) === stem; }) || (rows.length === 1 ? rows[0] : null);
-}
-function imageDimensions(src) { return new Promise((resolve, reject) => { const image = new Image(); image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight }); image.onerror = reject; image.src = src; }); }
-function fitBounds(row, size) {
-  const x = Math.max(0, Math.floor(Number(row.x))); const y = Math.max(0, Math.floor(Number(row.y)));
-  const right = Math.min(size.width, Math.ceil(Number(row.x) + Number(row.w))); const bottom = Math.min(size.height, Math.ceil(Number(row.y) + Number(row.h)));
-  if (!Number.isFinite(x + y + right + bottom) || right <= x || bottom <= y) throw new Error('координаты выходят за пределы изображения');
-  return { x, y, w: right - x, h: bottom - y };
-}
-function renderManyResults(results) {
+function renderResults(results) {
   latestResults = results;
-  manyResultsGrid.innerHTML = results.map(({ item, payload, error }) => {
-    const accepted = !error && Array.isArray(payload?.accepted) ? payload.accepted : [];
-    const recognized = payload?.status === 'matched' && accepted.length > 0;
-    const chosen = recognized ? accepted[0] : null;
-    const label = chosen ? escapeHtml(chosen.gallery_id) : 'Нет уверенного совпадения';
-    const score = chosen && Number.isFinite(Number(chosen.confidence)) ? Number(chosen.confidence).toFixed(3) : '';
+  resultsGrid.replaceChildren();
+  for (const { item, payload, error } of results) {
+    const accepted = Array.isArray(payload?.accepted) ? payload.accepted : [];
+    const top = payload?.status === 'matched' ? accepted[0] : null;
     const ranked = Array.isArray(payload?.ranked) ? payload.ranked.slice(0, 10) : [];
-    const ranking = ranked.map((candidate) => {
-      const value = Number(candidate.confidence);
-      return `<li>${escapeHtml(candidate.gallery_id)} · cosine ${Number.isFinite(value) ? value.toFixed(3) : '—'}</li>`;
-    }).join('');
-    return `<article class="many-result-card"><img src="${item.preview}" alt="${escapeHtml(item.name)}"><div class="many-result-caption"><strong>${label}</strong><span>${score ? `cosine ${score} (не вероятность)` : ''}</span></div>${ranking ? `<details><summary>Top‑10</summary><ol>${ranking}</ol></details>` : ''}${error ? `<small>${escapeHtml(error.message || error)}</small>` : ''}</article>`;
-  }).join('');
-  manyResults.classList.remove('hidden'); manyResults.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const card = document.createElement('article'); card.className = 'many-result-card';
+    const image = document.createElement('img'); image.src = item.preview; image.alt = item.name; card.appendChild(image);
+    const caption = document.createElement('div'); caption.className = 'many-result-caption';
+    caption.innerHTML = `<strong>${error ? 'Ошибка обработки' : top ? escapeHtml(top.gallery_id) : 'Нет уверенного совпадения'}</strong><span>${top ? `cosine ${Number(top.confidence).toFixed(3)}` : ''}</span>`;
+    card.appendChild(caption);
+    if (error) { const note = document.createElement('p'); note.className = 'result-error'; note.textContent = error.message; card.appendChild(note); }
+    if (ranked.length) {
+      const details = document.createElement('details');
+      details.innerHTML = `<summary>Top‑10</summary><ol>${ranked.map((item) => `<li>${escapeHtml(item.gallery_id)} · cosine ${Number(item.confidence).toFixed(3)}</li>`).join('')}</ol>`;
+      card.appendChild(details);
+    }
+    resultsGrid.appendChild(card);
+  }
+  resultsPanel.classList.remove('hidden'); resultsPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-exportManyBtn.addEventListener('click', () => {
-  ReidExport.download('reid-results.csv', ReidExport.manyCsv(latestResults), 'text/csv;charset=utf-8');
+imageInput.addEventListener('change', () => {
+  const files = [...imageInput.files];
+  imageSummary.textContent = files.length ? `${files.length} изображений: ${files.slice(0, 3).map((file) => file.name).join(', ')}${files.length > 3 ? '…' : ''}` : 'Изображения не выбраны.';
 });
-
-submitManyBtn.addEventListener('click', async () => {
-  await gallerySelectionReady;
-  if (gallerySelect.disabled) { setArchiveStatus('Галерея не готова. Загрузите минимум 10 изображений через /docs → /api/galleries.', 'error'); return; }
-  const images = state.fileStore.image;
-  if (!images.length) { setArchiveStatus('Добавьте хотя бы одно изображение.', 'error'); return; }
-  if (!state.fileStore.coord.length) { setArchiveStatus('Загрузите таблицу с указанными ниже колонками.', 'error'); return; }
-  submitManyBtn.disabled = true; setArchiveStatus(`Распознаём ${images.length} изображений…`);
+csvInput.addEventListener('change', async () => {
+  rows = []; tablePreview.classList.add('hidden');
+  const file = csvInput.files[0]; if (!file) return;
   try {
-    const tables = await Promise.all(state.fileStore.coord.map(readTable)); const rows = tables.flat(); const results = [];
-    for (const item of images) {
+    if (file.size > 1024 * 1024) throw new Error('CSV больше 1 МиБ.');
+    rows = parseBboxCsv(await file.text());
+    tablePreview.innerHTML = `<strong>${escapeHtml(file.name)}</strong> · ${rows.length} строк<div class="bbox-table-scroll"><table><thead><tr><th>image_id</th><th>x</th><th>y</th><th>w</th><th>h</th></tr></thead><tbody>${rows.slice(0, 5).map((row) => `<tr><td>${escapeHtml(row.image_id)}</td><td>${row.x}</td><td>${row.y}</td><td>${row.w}</td><td>${row.h}</td></tr>`).join('')}</tbody></table></div>`;
+    tablePreview.classList.remove('hidden'); setStatus(`CSV прочитан: ${rows.length} строк.`, 'success');
+  } catch (error) { setStatus(error.message, 'error'); }
+});
+document.getElementById('exportManyBtn').addEventListener('click', () => ReidExport.download('reid-results.csv', ReidExport.manyCsv(latestResults), 'text/csv;charset=utf-8'));
+
+submitBtn.addEventListener('click', async () => {
+  await gallerySelectionReady;
+  if (gallerySelect.disabled) { setStatus('Нет готовой галереи. Сначала добавьте минимум 10 автомобилей.', 'error'); return; }
+  const files = [...imageInput.files];
+  if (!files.length || !rows.length) { setStatus('Нужны и фотографии, и BBox CSV.', 'error'); return; }
+  let matched;
+  try {
+    if (files.some((file) => !/\.(jpe?g|png)$/i.test(file.name) || file.size > 20 * 1024 * 1024)) throw new Error('Каждый файл должен быть JPG/PNG до 20 МиБ.');
+    matched = matchRows(files, rows);
+  } catch (error) { setStatus(error.message, 'error'); return; }
+  submitBtn.disabled = true; resultsPanel.classList.add('hidden');
+  activePreviewUrls.forEach((url) => URL.revokeObjectURL(url)); activePreviewUrls = [];
+  const results = [];
+  try {
+    for (const [index, file] of files.entries()) {
+      setStatus(`Обрабатываем ${index + 1} из ${files.length}: ${file.name}`);
+      const preview = URL.createObjectURL(file); activePreviewUrls.push(preview);
+      const item = { name: file.name, preview };
       try {
-        const [blob, size] = await Promise.all([fetch(item.preview).then((response) => response.blob()), imageDimensions(item.preview)]);
-        const row = findRowForImage(rows, item); if (!row) throw new Error('строка с этим image_id не найдена');
-        const bbox = fitBounds(row, size); const body = new FormData(); body.append('image', blob, item.name || 'query.png');
-        Object.entries(bbox).forEach(([key, value]) => body.append(key, String(value))); body.append('topk', '10');
-        if (gallerySelect.value) body.append('gallery_id', gallerySelect.value);
-        const response = await fetch('/api/infer', { method: 'POST', body }); const payload = await response.json();
-        if (!response.ok) throw new Error(payload.detail || 'ошибка распознавания'); results.push({ item, payload });
+        const size = await imageDimensions(preview), bbox = matched.get(file);
+        if (bbox.x + bbox.w > size.width || bbox.y + bbox.h > size.height) throw new Error(`BBox выходит за пределы кадра ${size.width}×${size.height}.`);
+        const body = new FormData(); body.append('image', file, file.name);
+        for (const key of ['x', 'y', 'w', 'h']) body.append(key, String(bbox[key]));
+        body.append('topk', '10'); if (gallerySelect.value) body.append('gallery_id', gallerySelect.value);
+        const response = await fetch('/api/infer', { method: 'POST', body });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : `HTTP ${response.status}`);
+        results.push({ item, payload });
       } catch (error) { results.push({ item, error }); }
     }
-    renderManyResults(results); const failed = results.filter((result) => result.error).length;
-    setArchiveStatus(failed ? `Готово: ${failed} изображений не обработано. Проверьте строки таблицы.` : 'Распознавание завершено.', failed ? 'error' : 'success');
-  } catch (error) { setArchiveStatus(error.message, 'error'); }
-  finally { submitManyBtn.disabled = false; }
+    renderResults(results);
+    const failed = results.filter((item) => item.error).length;
+    setStatus(`Готово: ${results.length - failed} обработано, ${failed} ошибок.`, failed ? 'error' : 'success');
+  } finally { submitBtn.disabled = false; }
 });
-
-archiveUploadBtn.addEventListener('click', () => {
-  const input = document.createElement('input'); input.type = 'file'; input.accept = '.zip,.tar,.tgz,.gz,.bz2,.xz';
-  input.onchange = async (event) => { const file = event.target.files?.[0]; if (!file) return; try { setArchiveStatus('Загружаем архив…'); const body = new FormData(); body.append('archive', file); const response = await fetch('/api/replenishment/archive', { method: 'POST', body }); const payload = await response.json(); if (!response.ok) throw new Error(payload.detail || 'Ошибка архива'); setArchiveStatus(`В базу добавлено ${payload.count} файлов.`, 'success'); await loadPersistedFiles(); } catch (error) { setArchiveStatus(error.message, 'error'); } };
-  input.click();
-});
-
-backHomeBtn.addEventListener('click', () => { window.location.href = '/'; });
-renameCloseBtn.addEventListener('click', closeRenameModal); cancelRenameBtn.addEventListener('click', closeRenameModal); saveRenameBtn.addEventListener('click', saveRename);
-previewModal.addEventListener('click', (event) => { if (event.target.dataset.close === 'true') closePreview(); });
-renameModal.addEventListener('click', (event) => { if (event.target.dataset.close === 'true') closeRenameModal(); });
-loadPersistedFiles();

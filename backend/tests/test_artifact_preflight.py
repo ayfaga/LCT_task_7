@@ -72,3 +72,38 @@ def test_quick_start_respects_gallery_override_and_fails_before_install(
     assert quick_start.configured_paths() == (model_dir.resolve(), gallery.resolve())
     assert quick_start.main() == 1
     assert "Git LFS pointer" in capsys.readouterr().err
+
+
+def test_runtime_hash_mismatch_never_rewrites_manifest(tmp_path, monkeypatch):
+    model_dir, _ = bundle(tmp_path)
+    manifest = model_dir / "model_manifest.json"
+    before = manifest.read_bytes()
+
+    class BadRuntime:
+        def __init__(self, *_args):
+            raise ValueError("Preprocessing implementation SHA256 mismatch")
+
+    monkeypatch.setattr("app.ml.runtime.MLRuntime", BadRuntime)
+    with pytest.raises(ArtifactError, match="манифест не менялся"):
+        quick_start.verify_ml_runtime_loadable(model_dir, None)
+    assert manifest.read_bytes() == before
+
+
+def test_committed_preprocessing_hash_matches_implementation():
+    project = Path(__file__).resolve().parents[2]
+    manifest = json.loads((project / "model_artifacts/joint_l336/model_manifest.json").read_text())
+    implementation = project / "backend/app/ml/preprocessing.py"
+    assert manifest["preprocessing_sha256"] == hashlib.sha256(implementation.read_bytes()).hexdigest()
+
+
+def test_quick_start_installs_before_full_runtime_load(tmp_path, monkeypatch):
+    model_dir, _ = bundle(tmp_path)
+    order = []
+    monkeypatch.setenv("LCT_ML_ARTIFACT_DIR", str(model_dir))
+    monkeypatch.delenv("LCT_ML_GALLERY_PATH", raising=False)
+    monkeypatch.setattr(quick_start, "install_dependencies", lambda: order.append("install"))
+    monkeypatch.setattr(quick_start, "verify_ml_runtime_loadable", lambda *_: order.append("runtime"))
+    monkeypatch.setattr(quick_start, "start_local_stack", lambda *_: order.append("start"))
+    monkeypatch.setattr("sys.argv", ["quick_start.py"])
+    assert quick_start.main() == 0
+    assert order == ["install", "runtime", "start"]

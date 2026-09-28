@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Галерея автомобилей</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="workflow-page">
+    <main class="workflow-shell">
+      <a class="back-link" href="/">← Все действия</a>
+      <header class="workflow-header"><span class="flow-number">01 · База поиска</span><h1>Загрузить галерею</h1><p>Галерея — это набор автомобилей, среди которых модель ищет совпадения. Добавьте изображения и дождитесь готовности индекса.</p></header>
+
+      <section class="workflow-card">
+        <div class="section-header"><h2>1. Выберите галерею</h2></div>
+        <label for="gallerySelect">Существующая галерея</label>
+        <select id="gallerySelect"><option value="">Загружаем список…</option></select>
+        <div class="inline-form"><label for="galleryName">Или создайте новую</label><input id="galleryName" type="text" maxlength="100" placeholder="Например, камеры центра" /><button id="createGalleryBtn" class="secondary-btn" type="button">Создать</button></div>
+        <div id="galleryDetails" class="workflow-note" aria-live="polite"></div>
+        <button id="retryGalleryBtn" class="secondary-btn hidden" type="button">Повторить индексацию</button>
+      </section>
+
+      <section class="workflow-card">
+        <div class="section-header"><h2>2. Добавьте автомобили</h2></div>
+        <p class="workflow-note">Можно выбрать до 200 JPEG/PNG за одну партию либо ZIP до 100 МиБ. Для отдельных кропов CSV не нужен. Если фотографии — полные кадры, приложите CSV: подойдёт <code>image_id,x,y,w,h</code> организатора или <code>filename,gallery_id,x,y,w,h</code>. Для ZIP используйте второй формат внутри архива. <strong>Без CSV будет проиндексирован весь кадр.</strong> Большой исходный ZIP организатора импортируется отдельной CLI-командой, не через браузер.</p>
+        <div class="upload-grid">
+          <label class="upload-tile" for="galleryImages"><strong>Фотографии автомобилей</strong><span>JPG/PNG, несколько файлов</span><input id="galleryImages" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" multiple /></label>
+          <label class="upload-tile" for="galleryArchive"><strong>Или ZIP-архив</strong><span>Фотографии и необязательный manifest.csv</span><input id="galleryArchive" type="file" accept=".zip,application/zip" /></label>
+          <label class="upload-tile" for="galleryManifest"><strong>BBox CSV для полных кадров</strong><span>Не нужен, если машина уже обрезана</span><input id="galleryManifest" type="file" accept=".csv,text/csv" /></label>
+        </div>
+        <p id="gallerySelection" class="selection-summary" aria-live="polite">Файлы не выбраны.</p>
+        <button id="uploadGalleryBtn" class="action-btn" type="button">Загрузить и построить индекс</button>
+        <p id="galleryStatus" class="upload-status" role="status" aria-live="polite"></p>
+      </section>
+      <nav class="next-actions"><a href="/many">Пакетный поиск →</a><a href="/solo">Проверить одно изображение →</a></nav>
+    </main>
+    <script src="/static/gallery.js?v=20260929-1"></script>
+  </body>
+</html>
