@@ -10,6 +10,7 @@
     <div class="workbench">
       <button class="back-link" id="backHomeBtn" type="button">← Назад</button>
       <div class="page-header">
+        <span class="flow-number">Шаг 2 · Быстрый поиск</span>
         <h1>Одно изображение · ручной BBox</h1>
         <p>Загрузите исходный кадр и выделите автомобиль прямоугольником. Координаты будут рассчитаны автоматически.</p>
       </div>
@@ -34,7 +35,7 @@
 
         <div class="error-message" id="errorMessage">Некорректное выделение границы. Попробуйте еще раз, пожалуйста</div>
 
-        <div><label for="soloGallerySelect">Где искать:</label> <select id="soloGallerySelect" aria-label="Галерея для поиска"><option value="">Загрузка списка…</option></select> <a href="/gallery">Добавить галерею</a></div>
+        <div class="common-gallery-line"><span id="soloGalleryStatus" aria-live="polite">Проверяем общую галерею…</span><a href="/gallery">Пополнить галерею →</a></div>
 
         <div class="action-bar">
           <button class="action-btn" id="analyzeBtn" type="button" disabled>Найти совпадения</button>
@@ -44,6 +45,6 @@
     </div>
 
     <script src="/static/export.js?v=20260927-1"></script>
-    <script src="/static/solo.js?v=20260929-1"></script>
+    <script src="/static/solo.js?v=20260929-2"></script>
   </body>
 </html>

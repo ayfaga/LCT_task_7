@@ -2,28 +2,28 @@ const imageInput = document.getElementById('manyImages');
 const csvInput = document.getElementById('manyCsv');
 const imageSummary = document.getElementById('manyImagesSummary');
 const tablePreview = document.getElementById('coordTablePreview');
-const gallerySelect = document.getElementById('manyGallerySelect');
+const galleryStatus = document.getElementById('manyGalleryStatus');
 const statusBox = document.getElementById('archiveStatus');
 const submitBtn = document.getElementById('submitManyBtn');
 const resultsPanel = document.getElementById('manyResults');
 const resultsGrid = document.getElementById('manyResultsGrid');
 let rows = [], latestResults = [], activePreviewUrls = [];
+let commonGallery = null;
 const escapeHtml = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 const stem = (value) => String(value).replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '').toLowerCase();
 
 function setStatus(message, kind = 'info') { statusBox.textContent = message; statusBox.className = `upload-status ${kind}`; }
 
-async function loadGalleryChoices() {
-  const [readyResponse, listResponse] = await Promise.all([fetch('/ready'), fetch('/api/galleries')]);
-  if (!readyResponse.ok || !listResponse.ok) throw new Error('Не удалось загрузить галереи.');
-  const ready = await readyResponse.json(), galleries = await listResponse.json();
-  gallerySelect.replaceChildren();
-  if (ready.gallery_ready) gallerySelect.add(new Option(`Основная (${ready.gallery_size})`, ''));
-  galleries.filter((entry) => entry.search_ready).forEach((entry) => gallerySelect.add(new Option(`${entry.name} (${entry.image_count})`, entry.gallery_id)));
-  gallerySelect.disabled = !gallerySelect.options.length;
-  if (gallerySelect.disabled) gallerySelect.add(new Option('Нет готовой галереи', ''));
+async function loadCommonGallery() {
+  const response = await fetch('/api/common-gallery');
+  if (!response.ok) throw new Error('Не удалось проверить общую галерею.');
+  commonGallery = await response.json();
+  galleryStatus.textContent = commonGallery.search_ready
+    ? `● Общая галерея готова · ${commonGallery.image_count} автомобилей`
+    : `○ В общей галерее ${commonGallery.image_count} автомобилей · нужно минимум ${commonGallery.minimum_for_search || 10}`;
 }
-const gallerySelectionReady = loadGalleryChoices().catch((error) => { gallerySelect.replaceChildren(new Option(error.message, '')); gallerySelect.disabled = true; });
+const gallerySelectionReady = loadCommonGallery().catch((error) => { galleryStatus.textContent = error.message; });
+window.addEventListener('focus', () => { loadCommonGallery().catch((error) => { galleryStatus.textContent = error.message; }); });
 
 function splitCsv(text, delimiter) {
   const table = []; let row = [], cell = '', quoted = false;
@@ -133,7 +133,9 @@ document.getElementById('exportManyBtn').addEventListener('click', () => ReidExp
 
 submitBtn.addEventListener('click', async () => {
   await gallerySelectionReady;
-  if (gallerySelect.disabled) { setStatus('Нет готовой галереи. Сначала добавьте минимум 10 автомобилей.', 'error'); return; }
+  try { await loadCommonGallery(); }
+  catch (error) { setStatus(error.message, 'error'); return; }
+  if (!commonGallery?.search_ready) { setStatus('Общая галерея ещё не готова. Сначала добавьте минимум 10 автомобилей.', 'error'); return; }
   const files = [...imageInput.files];
   if (!files.length || !rows.length) { setStatus('Нужны и фотографии, и BBox CSV.', 'error'); return; }
   let matched;
@@ -154,7 +156,7 @@ submitBtn.addEventListener('click', async () => {
         if (bbox.x + bbox.w > size.width || bbox.y + bbox.h > size.height) throw new Error(`BBox выходит за пределы кадра ${size.width}×${size.height}.`);
         const body = new FormData(); body.append('image', file, file.name);
         for (const key of ['x', 'y', 'w', 'h']) body.append(key, String(bbox[key]));
-        body.append('topk', '10'); if (gallerySelect.value) body.append('gallery_id', gallerySelect.value);
+        body.append('topk', '10'); body.append('gallery_id', commonGallery.gallery_id);
         const response = await fetch('/api/infer', { method: 'POST', body });
         const payload = await response.json();
         if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : `HTTP ${response.status}`);

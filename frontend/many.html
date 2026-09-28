@@ -9,7 +9,7 @@
   <body class="workflow-page">
     <main class="workflow-shell">
       <a class="back-link" href="/">← Все действия</a>
-      <header class="workflow-header"><span class="flow-number">02 · Пакетный поиск</span><h1>Изображения + BBox CSV</h1><p>Загрузите исходные фотографии и одну таблицу с координатами машин. Мы сопоставим каждую строку с изображением по <code>image_id</code>.</p></header>
+      <header class="workflow-header"><span class="flow-number">Шаг 2 · Пакетный поиск</span><h1>Изображения + BBox CSV</h1><p>Загрузите исходные фотографии и одну таблицу с координатами машин. Мы сопоставим каждую строку с изображением по <code>image_id</code>.</p></header>
       <section class="workflow-card">
         <div class="section-header"><h2>1. Загрузите группу изображений</h2></div>
         <label class="upload-tile" for="manyImages"><strong>Выбрать JPG/PNG</strong><span>Несколько файлов сразу; они остаются в браузере до запуска поиска</span><input id="manyImages" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" multiple /></label>
@@ -23,9 +23,7 @@
       </section>
       <section class="workflow-card">
         <div class="section-header"><h2>3. Запустите поиск</h2></div>
-        <label for="manyGallerySelect">Где искать</label>
-        <select id="manyGallerySelect"><option value="">Загрузка списка…</option></select>
-        <a class="inline-link" href="/gallery">Добавить галерею</a>
+        <div class="common-gallery-line"><span id="manyGalleryStatus" aria-live="polite">Проверяем общую галерею…</span><a href="/gallery">Пополнить галерею →</a></div>
         <div class="workflow-actions"><button class="action-btn" id="submitManyBtn" type="button">Найти совпадения</button></div>
         <p id="archiveStatus" class="upload-status" role="status" aria-live="polite"></p>
       </section>
@@ -35,6 +33,6 @@
       </section>
     </main>
     <script src="/static/export.js?v=20260927-1"></script>
-    <script src="/static/many.js?v=20260929-1"></script>
+    <script src="/static/many.js?v=20260929-2"></script>
   </body>
 </html>

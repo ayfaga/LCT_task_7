@@ -7,6 +7,7 @@ const vm = require('node:vm');
 const fakeElement = () => ({ addEventListener() {}, replaceChildren() {}, classList: { add() {}, remove() {} } });
 const context = {
   document: { getElementById: fakeElement },
+  window: { addEventListener() {} },
   fetch: () => Promise.reject(new Error('offline test')),
   Option: function Option() {},
 };

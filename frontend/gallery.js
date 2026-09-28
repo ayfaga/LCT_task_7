@@ -1,12 +1,9 @@
-const gallerySelect = document.getElementById('gallerySelect');
-const galleryName = document.getElementById('galleryName');
 const galleryImages = document.getElementById('galleryImages');
 const galleryArchive = document.getElementById('galleryArchive');
 const galleryManifest = document.getElementById('galleryManifest');
 const gallerySelection = document.getElementById('gallerySelection');
 const galleryDetails = document.getElementById('galleryDetails');
 const galleryStatus = document.getElementById('galleryStatus');
-const createGalleryBtn = document.getElementById('createGalleryBtn');
 const retryGalleryBtn = document.getElementById('retryGalleryBtn');
 const uploadGalleryBtn = document.getElementById('uploadGalleryBtn');
 let activePoll = null;
@@ -27,22 +24,19 @@ async function apiJson(url, options) {
 }
 
 function renderGallery(info) {
-  if (!info) { galleryDetails.textContent = 'Выберите галерею или создайте новую.'; retryGalleryBtn.classList.add('hidden'); return; }
+  if (!info) { galleryDetails.textContent = 'Статус общей галереи недоступен.'; retryGalleryBtn.classList.add('hidden'); return; }
   const message = info.state === 'failed' ? `Ошибка индексации: ${info.error || 'причина неизвестна'}`
     : info.state === 'building' ? `Индексация: ${info.processed || 0} / ${info.pending_count || 0}`
       : info.search_ready ? 'Готова к поиску' : `Для поиска нужно минимум ${info.minimum_for_search || 10} автомобилей`;
-  galleryDetails.textContent = `${info.name}: ${info.image_count} изображений. ${message}.`;
+  galleryDetails.textContent = `${info.image_count} автомобилей · ${message}`;
   galleryDetails.dataset.state = info.state;
   retryGalleryBtn.classList.toggle('hidden', info.state !== 'failed' || !info.pending_count);
 }
 
-async function refreshGalleries(preferredId = gallerySelect.value) {
-  const galleries = await apiJson('/api/galleries');
-  gallerySelect.replaceChildren(new Option('Выберите галерею', ''));
-  galleries.forEach((item) => gallerySelect.add(new Option(`${item.name} · ${item.image_count} авто`, item.gallery_id)));
-  if (preferredId && galleries.some((item) => item.gallery_id === preferredId)) gallerySelect.value = preferredId;
-  renderGallery(galleries.find((item) => item.gallery_id === gallerySelect.value));
-  return galleries;
+async function refreshGallery() {
+  const info = await apiJson('/api/common-gallery');
+  renderGallery(info);
+  return info;
 }
 
 function summarizeSelection() {
@@ -120,65 +114,37 @@ async function normalizeManifest(file, images, archive) {
   return new File([lines.join('\n') + '\n'], 'manifest.csv', { type: 'text/csv' });
 }
 
-async function pollImport(id) {
+async function pollImport() {
   clearTimeout(activePoll);
   try {
-    const info = await apiJson(`/api/galleries/${id}`);
-    renderGallery(info);
+    const info = await refreshGallery();
     if (info.state === 'building') {
       setStatus(`Индексируем: ${info.processed || 0} / ${info.pending_count || 0}. Страницу можно оставить открытой.`);
-      activePoll = setTimeout(() => pollImport(id), 2500);
+      activePoll = setTimeout(pollImport, 2500);
     } else if (info.state === 'failed') {
       setStatus(`Индексация не завершилась: ${info.error || 'неизвестная ошибка'}. Можно повторить попытку.`, 'error');
     } else {
       setStatus(info.search_ready ? `Галерея готова: ${info.image_count} автомобилей. Теперь можно искать.` : `Партия добавлена; сейчас ${info.image_count} автомобилей. Для поиска требуется минимум 10.`, 'success');
-      await refreshGalleries(id);
+      await refreshGallery();
     }
   } catch (error) { setStatus(error.message, 'error'); }
 }
-
-createGalleryBtn.addEventListener('click', async () => {
-  const name = galleryName.value.trim();
-  if (!name) { setStatus('Введите название новой галереи.', 'error'); return; }
-  createGalleryBtn.disabled = true;
-  try {
-    const form = new FormData(); form.append('name', name);
-    const info = await apiJson('/api/galleries', { method: 'POST', body: form });
-    await refreshGalleries(info.gallery_id);
-    galleryName.value = '';
-    setStatus(`Галерея «${info.name}» создана. Теперь добавьте фотографии.`, 'success');
-  } catch (error) { setStatus(error.message, 'error'); }
-  finally { createGalleryBtn.disabled = false; }
-});
-
-gallerySelect.addEventListener('change', async () => {
-  clearTimeout(activePoll);
-  try {
-    const id = gallerySelect.value;
-    const info = id ? await apiJson(`/api/galleries/${id}`) : null;
-    renderGallery(info);
-    if (info?.state === 'building') pollImport(id);
-  } catch (error) { setStatus(error.message, 'error'); }
-});
 
 galleryImages.addEventListener('change', () => { if (galleryImages.files.length) galleryArchive.value = ''; summarizeSelection(); });
 galleryArchive.addEventListener('change', () => { if (galleryArchive.files.length) galleryImages.value = ''; summarizeSelection(); });
 galleryManifest.addEventListener('change', summarizeSelection);
 
 retryGalleryBtn.addEventListener('click', async () => {
-  const id = gallerySelect.value;
-  if (!id) return;
   retryGalleryBtn.disabled = true;
   try {
-    await apiJson(`/api/galleries/${id}/retry`, { method: 'POST' });
+    await apiJson('/api/common-gallery/retry', { method: 'POST' });
     setStatus('Повторно индексируем галерею…');
-    await pollImport(id);
+    await pollImport();
   } catch (error) { setStatus(error.message, 'error'); }
   finally { retryGalleryBtn.disabled = false; }
 });
 
 uploadGalleryBtn.addEventListener('click', async () => {
-  if (!gallerySelect.value) { setStatus('Сначала выберите или создайте галерею.', 'error'); return; }
   let selection;
   try { selection = validateSelection(); }
   catch (error) { setStatus(error.message, 'error'); return; }
@@ -190,12 +156,12 @@ uploadGalleryBtn.addEventListener('click', async () => {
     if (selection.archive) form.append('archive', selection.archive);
     const normalizedManifest = await normalizeManifest(selection.manifest, selection.images, selection.archive);
     if (normalizedManifest) form.append('manifest', normalizedManifest);
-    const id = gallerySelect.value;
-    await apiJson(`/api/galleries/${id}/images`, { method: 'POST', body: form });
+    await apiJson('/api/common-gallery/images', { method: 'POST', body: form });
     galleryImages.value = ''; galleryArchive.value = ''; galleryManifest.value = ''; summarizeSelection();
-    await pollImport(id);
+    await pollImport();
   } catch (error) { setStatus(error.message, 'error'); }
   finally { uploadGalleryBtn.disabled = false; }
 });
 
-refreshGalleries().catch((error) => setStatus(error.message, 'error'));
+refreshGallery().then((info) => { if (info.state === 'building') pollImport(); })
+  .catch((error) => setStatus(error.message, 'error'));

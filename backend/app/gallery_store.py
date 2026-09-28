@@ -28,6 +28,8 @@ MAX_GALLERY_IMAGES = 1000
 MAX_PIXELS = 50_000_000
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 GALLERY_ID_RE = re.compile(r"[0-9a-f]{32}\Z")
+COMMON_GALLERY_ID = "00000000000000000000000000000001"
+COMMON_GALLERY_NAME = "Общая галерея поиска"
 _write_lock = Lock()
 
 
@@ -78,11 +80,32 @@ def create_gallery(name: str) -> dict:
     gallery_id = uuid4().hex
     folder = gallery_dir(gallery_id)
     (folder / "images").mkdir(parents=True, exist_ok=False)
-    meta = {"gallery_id": gallery_id, "name": name, "state": "collecting",
-            "images": [], "pending": [], "gallery_file": None, "generation": 0,
-            "processed": 0, "job_id": None, "error": None}
+    meta = _initial_meta(gallery_id, name)
     _write_json(folder / "meta.json", meta)
     return public_gallery(meta)
+
+
+def _initial_meta(gallery_id: str, name: str) -> dict:
+    return {"gallery_id": gallery_id, "name": name, "state": "collecting",
+            "images": [], "pending": [], "gallery_file": None, "generation": 0,
+            "processed": 0, "job_id": None, "error": None}
+
+
+def read_common_gallery() -> dict:
+    """Read the sole UI gallery; an empty gallery does not write to disk on GET."""
+    path = gallery_dir(COMMON_GALLERY_ID) / "meta.json"
+    return public_gallery(read_gallery(COMMON_GALLERY_ID) if path.is_file()
+                          else _initial_meta(COMMON_GALLERY_ID, COMMON_GALLERY_NAME))
+
+
+def ensure_common_gallery() -> str:
+    """Create the stable UI gallery on first upload without touching other galleries."""
+    folder = gallery_dir(COMMON_GALLERY_ID)
+    with _write_lock:
+        if not (folder / "meta.json").is_file():
+            (folder / "images").mkdir(parents=True, exist_ok=True)
+            _write_json(folder / "meta.json", _initial_meta(COMMON_GALLERY_ID, COMMON_GALLERY_NAME))
+    return COMMON_GALLERY_ID
 
 
 def list_galleries() -> list[dict]:

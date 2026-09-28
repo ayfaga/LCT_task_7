@@ -21,7 +21,8 @@ from sqlalchemy.orm import Session
 
 from .database import Base, engine, get_db
 from .gallery_store import (
-    create_gallery, fail_import, gallery_dir, list_galleries, public_gallery,
+    COMMON_GALLERY_ID, create_gallery, ensure_common_gallery, fail_import,
+    gallery_dir, list_galleries, public_gallery, read_common_gallery,
     read_gallery, retry_import, stage_import,
 )
 from .ml_gateway import MAX_IMAGE_BYTES, build_ml_gallery, call_ml, get_ml_ready
@@ -179,6 +180,31 @@ def new_gallery(name: str = Form(...)):
 @app.get("/api/galleries")
 def galleries():
     return list_galleries()
+
+
+@app.get("/api/common-gallery")
+def common_gallery():
+    return read_common_gallery()
+
+
+@app.post("/api/common-gallery/images", status_code=202)
+async def import_common_gallery_images(
+    background_tasks: BackgroundTasks,
+    images: list[UploadFile] = File(default=[]),
+    archive: UploadFile | None = File(None),
+    manifest: UploadFile | None = File(None),
+):
+    gallery_id = ensure_common_gallery()
+    result = await stage_import(gallery_id, images, archive, manifest)
+    background_tasks.add_task(_finish_gallery_import, gallery_id, result["job_id"])
+    return result
+
+
+@app.post("/api/common-gallery/retry", status_code=202)
+def retry_common_gallery(background_tasks: BackgroundTasks):
+    result = retry_import(COMMON_GALLERY_ID)
+    background_tasks.add_task(_finish_gallery_import, COMMON_GALLERY_ID, result["job_id"])
+    return result
 
 
 @app.get("/api/galleries/{gallery_id}")
