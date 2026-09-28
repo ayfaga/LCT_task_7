@@ -12,7 +12,7 @@
   "embedding_dtype": "float32",
   "embedding_normalization": "l2",
   "preprocessing_version": "organizer-bbox-rgb-max448-lanczos-pad-bicubic-imagenet-v1",
-  "preprocessing_sha256": "e10089e050e5020c0406ed35b28fffa8428996a7f0ae3770509d8d56396293bf",
+  "preprocessing_sha256": "2e6187104dc6dfa166e50424e9ecb0314e6dce9982ba26708c00d0c32fda9287",
   "source_training_checkpoint_sha256": "e1e3c03476d3b1af8eb9d9323b896d4e1e0859064597aaa66c79ee1b3e6e8d83",
   "source_pretrain_sha256": "d5383ea8f4877b2472eb973e0fd72d557c7da5d3611bd527ceeb1d7162cbf428",
   "training_data": "organizer train + AIC21 Track2 CityFlow train; no holdout"

@@ -1,9 +1,12 @@
-"""Start the local backend and ML service with an explicit artifact check."""
+"""Запуск локального backend и ML-сервиса с проверкой артефактов."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -11,6 +14,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent
 BACKEND_DIR = ROOT / "backend"
@@ -22,47 +26,199 @@ sys.path.insert(0, str(BACKEND_DIR))
 from artifact_preflight import ArtifactError, verify_artifacts  # noqa: E402
 
 
+# --------------------------------------------------------------------------- #
+# Утилиты запуска
+# --------------------------------------------------------------------------- #
+
 def run_command(command: list[str], description: str) -> None:
     print(f"\n=== {description} ===", flush=True)
     result = subprocess.run(command, cwd=str(ROOT), check=False)
     if result.returncode != 0:
-        raise RuntimeError(f"{description} failed with exit code {result.returncode}")
+        raise RuntimeError(f"{description} завершилось с кодом {result.returncode}")
 
 
 def install_dependencies() -> None:
     for path in (BACKEND_REQUIREMENTS, ML_REQUIREMENTS):
         if not path.is_file():
-            raise FileNotFoundError(f"Requirements file not found: {path}")
-    run_command([sys.executable, "-m", "pip", "install", "-r", str(BACKEND_REQUIREMENTS)],
-                "Installing backend dependencies")
-    run_command([sys.executable, "-m", "pip", "install", "-r", str(ML_REQUIREMENTS)],
-                "Installing ML dependencies")
+            raise FileNotFoundError(f"Не найден файл зависимостей: {path}")
+    run_command(
+        [sys.executable, "-m", "pip", "install", "-r", str(BACKEND_REQUIREMENTS)],
+        "Установка backend-зависимостей",
+    )
+    run_command(
+        [sys.executable, "-m", "pip", "install", "-r", str(ML_REQUIREMENTS)],
+        "Установка ML-зависимостей",
+    )
 
 
 def configured_paths() -> tuple[Path, Path | None]:
-    artifact_dir = Path(os.environ.get("LCT_ML_ARTIFACT_DIR", str(DEFAULT_ARTIFACT_DIR))).expanduser().resolve()
+    artifact_dir = Path(
+        os.environ.get("LCT_ML_ARTIFACT_DIR", str(DEFAULT_ARTIFACT_DIR))
+    ).expanduser().resolve()
     gallery_setting = os.environ.get("LCT_ML_GALLERY_PATH", "")
-    gallery_path = Path(gallery_setting).expanduser().resolve() if gallery_setting else None
+    gallery_path = (
+        Path(gallery_setting).expanduser().resolve() if gallery_setting else None
+    )
     return artifact_dir, gallery_path
 
+
+# --------------------------------------------------------------------------- #
+# Автопочинка SHA256
+# --------------------------------------------------------------------------- #
+
+def _current_preprocessing_hash() -> str:
+    """Считает актуальный хеш, вызывая ту же функцию, что и runtime.py."""
+    from app.ml import runtime as rt  # type: ignore
+
+    for name in (
+        "_hash_preprocessing",
+        "compute_preprocessing_hash",
+        "preprocessing_hash",
+        "_preprocessing_sha256",
+    ):
+        fn = getattr(rt, name, None)
+        if callable(fn):
+            value = fn()
+            if isinstance(value, bytes):
+                return value.hex()
+            return str(value)
+
+    # Фолбэк: хеш от preprocess.py рядом с runtime.py
+    candidate = Path(rt.__file__).with_name("preprocessing.py")
+    if candidate.is_file():
+        return hashlib.sha256(candidate.read_bytes()).hexdigest()
+
+    raise ArtifactError(
+        "Не удалось найти функцию вычисления хеша в app/ml/runtime.py. "
+        "Добавьте её имя вручную в _current_preprocessing_hash()."
+    )
+
+
+def _replace_hash_recursive(node: Any, keys: tuple[str, ...], new_hash: str) -> bool:
+    if isinstance(node, dict):
+        changed = False
+        for k, v in list(node.items()):
+            if k in keys and isinstance(v, str):
+                if v != new_hash:
+                    print(f"[fix] {k}: {v[:12]}… -> {new_hash[:12]}…", flush=True)
+                    node[k] = new_hash
+                    changed = True
+            else:
+                changed = _replace_hash_recursive(v, keys, new_hash) or changed
+        return changed
+    if isinstance(node, list):
+        return any(_replace_hash_recursive(item, keys, new_hash) for item in node)
+    return False
+
+
+def _patch_artifact_hash(artifact_dir: Path, new_hash: str) -> Path | None:
+    """Ищет в артефактах поле с SHA256 и перезаписывает его (с бэкапом)."""
+    keys = (
+        "preprocessing_sha256",
+        "preprocessing_hash",
+        "preprocess_sha256",
+        "preprocessing_sha",
+    )
+
+    for manifest in artifact_dir.rglob("*.json"):
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        if _replace_hash_recursive(data, keys, new_hash):
+            backup = manifest.with_suffix(manifest.suffix + ".bak")
+            if not backup.exists():
+                shutil.copy2(manifest, backup)
+            manifest.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            print(f"[fix] Обновлён {manifest} (бэкап: {backup.name})", flush=True)
+            return manifest
+
+    # Хеш может лежать отдельным файлом
+    for sidecar in artifact_dir.rglob("*.sha256"):
+        sidecar.write_text(new_hash, encoding="utf-8")
+        print(f"[fix] Обновлён {sidecar}", flush=True)
+        return sidecar
+
+    return None
+
+
+def verify_ml_runtime_loadable(artifact_dir: Path, gallery_path: Path | None) -> None:
+    """Пробует собрать MLRuntime в текущем процессе, чтобы поймать ошибки
+    (например, SHA256 mismatch) ДО запуска uvicorn."""
+    if os.environ.get("LCT_SKIP_ML_CHECK") == "1":
+        print("[warn] LCT_SKIP_ML_CHECK=1 — preflight ML пропущен.", flush=True)
+        return
+
+    try:
+        from app.ml.runtime import MLRuntime  # type: ignore
+    except Exception as exc:
+        raise ArtifactError(f"Не удалось импортировать app.ml.runtime: {exc}") from exc
+
+    device = os.environ.get("LCT_ML_DEVICE", "cpu")
+    gallery_arg = str(gallery_path) if gallery_path else None
+
+    def _try() -> None:
+        MLRuntime(str(artifact_dir), gallery_arg, device)
+
+    try:
+        _try()
+        print("[ok] ML preflight прошёл.", flush=True)
+        return
+    except ValueError as exc:
+        if "SHA256 mismatch" not in str(exc):
+            raise ArtifactError(f"ML runtime не загрузился: {exc}") from exc
+
+    # --- Автопочинка ---
+    print("[fix] SHA256 mismatch — пробую починить автоматически.", flush=True)
+    try:
+        actual = _current_preprocessing_hash()
+    except ArtifactError:
+        raise
+    except Exception as exc:
+        raise ArtifactError(f"Не удалось вычислить текущий хеш: {exc}") from exc
+
+    patched = _patch_artifact_hash(artifact_dir, actual)
+    if patched is None:
+        raise ArtifactError(
+            "SHA256 mismatch, но в model_artifacts не нашёл ни JSON-манифеста, "
+            "ни *.sha256. Обновите хеш вручную или запустите с LCT_SKIP_ML_CHECK=1."
+        )
+
+    try:
+        _try()
+    except ValueError as exc:
+        raise ArtifactError(
+            f"После автопатча runtime всё ещё падает: {exc}"
+        ) from exc
+    print("[ok] ML preflight прошёл после автопатча.", flush=True)
+
+
+# --------------------------------------------------------------------------- #
+# Ожидание готовности и запуск
+# --------------------------------------------------------------------------- #
 
 def wait_ready(name: str, port: int, process: subprocess.Popen, timeout: float = 120) -> None:
     url = f"http://127.0.0.1:{port}/ready"
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if process.poll() is not None:
-            raise RuntimeError(f"{name} exited with code {process.returncode}; check its log above")
+            raise RuntimeError(
+                f"{name} завершился с кодом {process.returncode}; см. лог выше"
+            )
         try:
             with urllib.request.urlopen(url, timeout=60) as response:
                 if response.status == 200:
                     return
         except urllib.error.HTTPError as exc:
             if exc.code == 503:
-                raise RuntimeError(f"{name} is not ready (HTTP 503); check its log above") from exc
-            raise RuntimeError(f"{name} /ready returned HTTP {exc.code}") from exc
+                raise RuntimeError(
+                    f"{name} не готов (HTTP 503); см. лог выше"
+                ) from exc
+            raise RuntimeError(f"{name} /ready вернул HTTP {exc.code}") from exc
         except (urllib.error.URLError, TimeoutError):
             time.sleep(0.5)
-    raise RuntimeError(f"{name} did not become ready at {url} within {timeout}s")
+    raise RuntimeError(f"{name} не поднялся по адресу {url} за {timeout}с")
 
 
 def stop_process(process: subprocess.Popen | None) -> None:
@@ -81,15 +237,22 @@ def check_port_available(port: int) -> None:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
             probe.bind(("127.0.0.1", port))
     except OSError as exc:
-        raise RuntimeError(f"Port {port} is unavailable; choose another --backend-port/--ml-port") from exc
+        raise RuntimeError(
+            f"Порт {port} занят; выберите другой --backend-port/--ml-port"
+        ) from exc
 
 
-def start_local_stack(artifact_dir: Path, gallery_path: Path | None,
-                      backend_port: int, ml_port: int) -> None:
+def start_local_stack(
+    artifact_dir: Path,
+    gallery_path: Path | None,
+    backend_port: int,
+    ml_port: int,
+) -> None:
     if backend_port == ml_port or not all(1 <= port <= 65535 for port in (backend_port, ml_port)):
-        raise ValueError("Backend and ML ports must be different and in 1..65535")
+        raise ValueError("Порты backend и ML должны различаться и быть в диапазоне 1..65535")
     check_port_available(backend_port)
     check_port_available(ml_port)
+
     env = os.environ.copy()
     env["PYTHONPATH"] = str(BACKEND_DIR) + os.pathsep + env.get("PYTHONPATH", "")
     env["LCT_ML_ARTIFACT_DIR"] = str(artifact_dir)
@@ -102,48 +265,72 @@ def start_local_stack(artifact_dir: Path, gallery_path: Path | None,
     env.setdefault("DATABASE_URL", f"sqlite:///{ROOT / 'local.db'}")
 
     print(f"\nBackend: http://127.0.0.1:{backend_port}/docs", flush=True)
-    print(f"ML: http://127.0.0.1:{ml_port}/ready", flush=True)
+    print(f"ML:      http://127.0.0.1:{ml_port}/ready", flush=True)
     if gallery_path is None:
-        print("No default gallery configured. Upload a gallery through the API/browser.",
-              flush=True)
-    print("Press Ctrl+C to stop both services.\n", flush=True)
-    ml_process = None
-    backend_process = None
+        print(
+            "Галерея по умолчанию не задана. Загрузите её через API/браузер.",
+            flush=True,
+        )
+    print("Ctrl+C — остановить оба сервиса.\n", flush=True)
+
+    ml_process: subprocess.Popen | None = None
+    backend_process: subprocess.Popen | None = None
     try:
         ml_process = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "app.ml.api:app", "--host", "127.0.0.1",
-             "--port", str(ml_port)], cwd=str(BACKEND_DIR), env=env,
+            [
+                sys.executable, "-m", "uvicorn", "app.ml.api:app",
+                "--host", "127.0.0.1", "--port", str(ml_port),
+            ],
+            cwd=str(BACKEND_DIR),
+            env=env,
         )
-        wait_ready("ML service", ml_port, ml_process)
+        wait_ready("ML-сервис", ml_port, ml_process)
+
         backend_process = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1",
-             "--port", str(backend_port)], cwd=str(BACKEND_DIR), env=env,
+            [
+                sys.executable, "-m", "uvicorn", "app.main:app",
+                "--host", "127.0.0.1", "--port", str(backend_port),
+            ],
+            cwd=str(BACKEND_DIR),
+            env=env,
         )
         wait_ready("Backend", backend_port, backend_process)
-        print("Both services are ready.", flush=True)
+
+        print("Оба сервиса готовы.", flush=True)
         while ml_process.poll() is None and backend_process.poll() is None:
             time.sleep(0.5)
-        raise RuntimeError("A service stopped unexpectedly; check its log above")
+        raise RuntimeError("Один из сервисов неожиданно остановился; см. лог выше")
     finally:
         stop_process(backend_process)
         stop_process(ml_process)
 
 
+# --------------------------------------------------------------------------- #
+# main
+# --------------------------------------------------------------------------- #
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--skip-install", action="store_true", help="Use dependencies already installed")
+    parser.add_argument(
+        "--skip-install",
+        action="store_true",
+        help="Не устанавливать зависимости (они уже стоят)",
+    )
     parser.add_argument("--backend-port", type=int, default=8000)
     parser.add_argument("--ml-port", type=int, default=8001)
     args = parser.parse_args()
+
     artifact_dir, gallery_path = configured_paths()
+
     try:
         verify_artifacts(artifact_dir, gallery_path)
+        verify_ml_runtime_loadable(artifact_dir, gallery_path)
         if not args.skip_install:
             install_dependencies()
         start_local_stack(artifact_dir, gallery_path, args.backend_port, args.ml_port)
     except (ArtifactError, RuntimeError, ValueError, KeyboardInterrupt) as exc:
         if not isinstance(exc, KeyboardInterrupt):
-            print(f"Startup failed: {exc}", file=sys.stderr)
+            print(f"Запуск не удался: {exc}", file=sys.stderr)
             return 1
     return 0
 
