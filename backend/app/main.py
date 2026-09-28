@@ -51,7 +51,7 @@ app.add_middleware(
 @app.middleware("http")
 async def disable_cache(request: Request, call_next):
     response = await call_next(request)
-    if request.url.path in {"/", "/solo", "/many", "/replenishment"} or request.url.path.startswith("/static/"):
+    if request.url.path in {"/", "/solo", "/many", "/gallery", "/replenishment"} or request.url.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
@@ -87,6 +87,11 @@ def read_solo() -> FileResponse:
 @app.get("/many")
 def read_many() -> FileResponse:
     return FileResponse(os.path.join(STATIC_DIR, "many.html"))
+
+
+@app.get("/gallery")
+def read_gallery_page() -> FileResponse:
+    return FileResponse(os.path.join(STATIC_DIR, "gallery.html"))
 
 
 @app.get("/replenishment")

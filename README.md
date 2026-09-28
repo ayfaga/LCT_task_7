@@ -21,8 +21,9 @@ API/export contracts, local checks and remaining external gates, see the
 For the organizer's large original JPEG + `image_id,x,y,w,h` ZIP, use the
 [streaming archive importer](docs/ORGANIZER_ARCHIVE_IMPORT.md). It builds
 the compatible gallery and all three submission files without unpacking the
-whole archive. The general replenishment button stores files only; it does
-not index this archive. Docker gallery mounting has a dedicated opt-in override.
+whole archive. The legacy `/replenishment` page stores files only; the new
+`/gallery` page indexes browser-sized batches for actual search. Docker gallery
+mounting has a dedicated opt-in override.
 
 This branch provides a backend API and an isolated ML service for the selected
 joint encoder and hybrid refusal policy. The model remains a competition
@@ -80,7 +81,7 @@ docker compose ps
 curl -fsS http://127.0.0.1:18000/ready
 ```
 
-The backend API and OpenAPI docs are at `http://127.0.0.1:18000` and `/docs` with the shown port settings. The ML service is also exposed locally on port 18001 for diagnostics. Host ports default to 8000/8001 and can be overridden independently. The existing browser UI uses the same backend endpoints; it now shows ranked IDs and cosine confidence and can export results. Its visual design was not changed.
+The backend API and OpenAPI docs are at `http://127.0.0.1:18000` and `/docs` with the shown port settings. The ML service is also exposed locally on port 18001 for diagnostics. Host ports default to 8000/8001 and can be overridden independently. The browser UI has three primary actions: `/gallery` creates and indexes a searchable gallery, `/many` takes query images plus `image_id,x,y,w,h` CSV, and `/solo` lets the operator draw a rectangular BBox on one original image. Results show ranked IDs and cosine confidence and can be exported. The old `/replenishment` route remains available for legacy file storage but is not linked from the home screen.
 
 On Linux with an NVIDIA GPU and the Docker GPU runtime, use `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d`. This optional GPU path has not been measured locally; the measurements below used Docker Desktop CPU.
 
@@ -112,6 +113,6 @@ curl -F image=@/path/to/query.jpg -F x=0 -F y=0 -F w=640 -F h=360 \
 
 `POST /api/galleries/{id}/images` returns 202; poll `GET /api/galleries/{id}` until `state=ready` (or `collecting` if fewer than ten images). Search requires at least ten processed images because the fixed refusal policy uses cosine top-10. `GET /api/galleries` lists galleries, `GET /api/galleries/{id}/images/{image_key}` previews a stored image, and `POST /api/galleries/{id}/retry` retries a failed import. Each upload is limited to 200 images and 200 MiB total; an individual image is limited to 20 MiB and a ZIP to 100 MiB compressed. A gallery holds at most 1000 images.
 
-Without a manifest, each image is treated as an already cropped vehicle and its filename stem becomes its ID. For full frames, send a CSV as the `manifest` field or put `manifest.csv` at the ZIP root. Columns: `filename,gallery_id,x,y,w,h`; `filename` matches the multipart filename or path inside ZIP, and BBox coordinates refer to the original image. Empty BBox means the whole image. Keep gallery IDs unique within a gallery. A private local test page can be served separately from the research workspace; no test UI is packaged in this Git repository.
+Without a manifest, each image is treated as an already cropped vehicle and its filename stem becomes its ID. For full frames, send a CSV as the `manifest` field or put `manifest.csv` at the ZIP root. Columns: `filename,gallery_id,x,y,w,h`; `filename` matches the multipart filename or path inside ZIP, and BBox coordinates refer to the original image. Empty BBox means the whole image. Keep gallery IDs unique within a gallery. The packaged `/gallery` page uses this API and shows indexing status. For the organizer's much larger original ZIP, use the streaming CLI above rather than the browser importer.
 
 Architecture, version contract and handoff details: [backend handoff](docs/BACKEND_HANDOFF.md), [backend developer guide](docs/BACKEND_DEVELOPER_GUIDE.md), and [ML package guide](backend/ml/README.md). The selected model's [training source and exact recipe](repro/README.md) are included. For the current evidence-based criteria audit see [Mac criteria audit](docs/CRITERIA_AUDIT_MAC_20260927.md); the earlier [startup diagnosis](docs/LOCAL_STARTUP_AND_CRITERIA_20260927.md) is historical.

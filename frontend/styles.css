@@ -942,6 +942,64 @@ body.many-page {
   .solo-alternatives { grid-template-columns: 1fr; }
 }
 
+/* Three-step ReID workflow. Keep the legacy replenishment page available,
+   but make the searchable gallery the primary upload path. */
+.landing-shell { max-width: 1320px; }
+.landing-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; }
+.landing-grid .landing-card { order: initial !important; }
+.landing-card {
+  align-items: flex-start; text-align: left; text-decoration: none;
+  padding: 22px; gap: 12px; transition: transform .18s ease, box-shadow .18s ease;
+}
+.landing-card:hover, .landing-card:focus-visible { transform: translateY(-4px); box-shadow: 0 22px 38px rgba(10,46,78,.15); }
+.landing-card img { max-width: none; height: 180px; object-fit: cover; }
+.landing-card .card-glyph { display: grid; place-items: center; width: 66px; height: 66px; border-radius: 17px; background: linear-gradient(135deg, #e7f3ff, #d7edfa); color: var(--primary); font-size: 2.3rem; line-height: 1; }
+.landing-card strong { font-size: 1.25rem; line-height: 1.25; }
+.landing-card .flow-number { align-self: flex-start; font-size: .78rem; }
+.landing-card .card-description { font-size: .92rem; line-height: 1.5; font-weight: 500; color: var(--muted); flex: 1; }
+.landing-card .card-action { font-size: .92rem; color: var(--primary); }
+.flow-number { display: inline-block; color: var(--primary); text-transform: uppercase; letter-spacing: .09em; font-weight: 800; }
+
+body.workflow-page { min-height: 100vh; padding: 28px 20px 60px; }
+.workflow-shell { width: min(1080px, 100%); margin: 0 auto; }
+.workflow-header { margin: 14px 0 24px; }
+.workflow-header h1 { color: var(--primary-deep); font-size: clamp(2.1rem, 4vw, 3.5rem); margin: 8px 0 12px; }
+.workflow-header p { max-width: 740px; color: var(--muted); line-height: 1.6; margin: 0; }
+.workflow-card { background: #fff; border: 1px solid var(--card-border); box-shadow: 0 12px 32px rgba(10,46,78,.08); border-radius: 22px; padding: 24px; margin-bottom: 18px; }
+.workflow-card .section-header { margin-bottom: 16px; }
+.workflow-card label:not(.upload-tile), .workflow-card .inline-form label { display: block; font-weight: 700; margin-bottom: 8px; }
+.workflow-card select, .workflow-card input[type="text"] { width: min(520px, 100%); padding: 11px 14px; border: 1px solid #bacbdf; border-radius: 12px; background: #fff; color: var(--text); font: inherit; }
+.workflow-card select { display: block; }
+.inline-form { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; margin-top: 18px; }
+.inline-form label { flex-basis: 100%; }
+.inline-form input { flex: 1; }
+.inline-form .secondary-btn { border: 1px solid #bfd3e8; border-radius: 12px; padding: 11px 18px; color: var(--primary); background: #f0f7ff; font-weight: 700; cursor: pointer; }
+.workflow-note { color: var(--muted); line-height: 1.6; margin: 10px 0 18px; }
+.workflow-note strong { color: var(--primary-deep); }
+.workflow-note code, .workflow-header code { color: var(--primary-deep); background: #edf5ff; padding: 2px 5px; border-radius: 5px; }
+.upload-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.upload-tile { display: flex; flex-direction: column; gap: 7px; padding: 16px; border: 2px dashed #c2d7eb; border-radius: 16px; background: #f8fbff; cursor: pointer; }
+.upload-tile:hover { border-color: var(--primary); }
+.upload-tile span { font-size: .86rem; color: var(--muted); font-weight: 400; }
+.upload-tile input { max-width: 100%; margin-top: 7px; font: inherit; font-size: .82rem; }
+.selection-summary, .bbox-readout { color: var(--muted); font-size: .94rem; line-height: 1.5; }
+.workflow-card .upload-status { margin-top: 14px; min-height: 0; }
+.workflow-card .upload-status:empty { display: none; }
+.workflow-actions { margin-top: 20px; }
+.inline-link { display: inline-block; margin-top: 10px; color: var(--primary); font-weight: 700; }
+.next-actions { display: flex; gap: 20px; flex-wrap: wrap; margin: 24px 0; }
+.next-actions a { color: var(--primary); font-weight: 700; }
+.drawing-svg { cursor: crosshair; touch-action: none; }
+.bbox-readout { margin: 0; padding: 10px 14px; background: #fff; border-radius: 10px; }
+.stage-topbar .secondary-btn { background: #fff; color: var(--primary); border: 1px solid #bfd3e8; border-radius: 10px; padding: 9px 12px; font-weight: 700; cursor: pointer; }
+.action-btn:disabled { cursor: not-allowed; opacity: .52; }
+.result-error { margin: 0; padding: 0 14px 14px; color: #8b2d2d; }
+.many-result-card details { padding: 0 14px 14px; }
+.many-result-card ol { padding-left: 24px; }
+.bbox-table-preview { margin-top: 14px; }
+@media (max-width: 900px) { .landing-grid { grid-template-columns: 1fr; } .landing-card img { max-width: 340px; } .upload-grid { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { body.workflow-page { padding: 18px 12px 40px; } .workflow-card { padding: 18px; } .inline-form input { flex-basis: 100%; } }
+
 .subtitle-panel {
   margin: 0 0 20px;
   padding: 14px 18px;

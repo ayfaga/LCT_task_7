@@ -14,36 +14,17 @@
       <header class="hero landing-hero">
         <div class="hero-content hero-content-compact">
           <p class="eyebrow">Лидеры цифровой трансформации 2026 - команда "Мечты"</p>
-          <h1>Здравствуйте!</h1>
-          <p class="subtitle">Выберите необходимое действие:</p>
+          <h1>Поиск автомобиля по фотографии</h1>
+          <p class="subtitle">Сначала подготовьте галерею, затем проверьте одно изображение или целую группу. Для исходных кадров указывайте BBox автомобиля.</p>
         </div>
       </header>
 
       <main class="main-content landing-grid">
-        <button class="landing-card" type="button" data-route="/replenishment">
-          <img src="/static/images/popolnenie_bd.png" alt="Пополнение базы данных" />
-          <span>Пополнение базы данных</span>
-        </button>
-
-        <button class="landing-card" type="button" data-route="/solo">
-          <img src="/static/images/ocr_machine.png" alt="Распознавание машины solo" />
-          <span>Распознавание машины (одиночное)</span>
-        </button>
-
-        <button class="landing-card" type="button" data-route="/many">
-          <img src="/static/images/multi_identification.png" alt="Распознавание машины multi" />
-          <span>Распознавание машин (массовое)</span>
-        </button>
+        <a class="landing-card" href="/gallery"><span class="flow-number">01 · База поиска</span><span class="card-glyph" aria-hidden="true">▤</span><strong>Загрузить галерею</strong><span class="card-description">Добавьте фотографии автомобилей. Для полных кадров приложите CSV с BBox — после индексации они станут доступны поиску.</span><span class="card-action">Открыть галерею →</span></a>
+        <a class="landing-card" href="/many"><span class="flow-number">02 · Пакетный поиск</span><span class="card-glyph" aria-hidden="true">▦</span><strong>Изображения + BBox CSV</strong><span class="card-description">Загрузите группу запросов и таблицу image_id, x, y, w, h. Получите результаты для каждого кадра.</span><span class="card-action">Открыть пакетный поиск →</span></a>
+        <a class="landing-card" href="/solo"><span class="flow-number">03 · Быстрая проверка</span><span class="card-glyph" aria-hidden="true">□</span><strong>Одно изображение</strong><span class="card-description">Загрузите кадр и выделите автомобиль прямоугольником прямо на фотографии.</span><span class="card-action">Открыть ручной поиск →</span></a>
       </main>
-
-      <section class="panel landing-panel" id="historyPanel">
-        <div class="section-header">
-          <h2>История запросов</h2>
-        </div>
-        <div id="requestsList" class="requests-list"></div>
-      </section>
     </div>
 
-    <script src="/static/app.js?v=20260926-1"></script>
   </body>
 </html>
