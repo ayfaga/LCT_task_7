@@ -100,3 +100,18 @@ def test_same_bbox_contract_from_directory(tmp_path):
     assert splits["gallery"][1][0][0] == gallery_id
     with open_source(folder) as source:
         assert source.open(f"images/{gallery_id}.jpg").read(2) == b"\xff\xd8"
+
+        class FakeEncoder:
+            def embed_crops(self, crops, batch_size):
+                assert len(crops) == 1 and crops[0].size == (40, 40)
+                vector = np.zeros((1, 1024), dtype=np.float32)
+                vector[0, 0] = 1.0
+                return vector
+
+        output = tmp_path / "directory_gallery.npz"
+        encode_split(source, splits["gallery"][1], FakeEncoder(),
+                     {"model_version": "fixture", "model_sha256": "sha"},
+                     output, 1, "gallery")
+    with np.load(output, allow_pickle=False) as saved:
+        assert saved["gallery_ids"].tolist() == [gallery_id]
+        assert saved["embeddings"].shape == (1, 1024)

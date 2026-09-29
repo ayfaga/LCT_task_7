@@ -124,3 +124,10 @@ def test_backend_browser_gateway_streams_same_job(tmp_path, monkeypatch):
     assert client.get(f"/api/judge-export/jobs/{job_id}/files/embeddings.npy").content == b"embeddings.npy"
     assert client.post("/api/judge-export/jobs", content=archive,
                        headers={"content-type": "application/zip", "origin": "https://evil.test"}).status_code == 403
+    assert client.get("/api/judge-export/config", headers={"origin": "https://evil.test"}).status_code == 403
+    assert client.get(f"/api/judge-export/jobs/{job_id}",
+                      headers={"origin": "https://evil.test"}).status_code == 403
+    assert client.get(f"/api/judge-export/jobs/{job_id}/files/embeddings.npy",
+                      headers={"origin": "https://evil.test"}).status_code == 403
+    assert client.get(f"/api/judge-export/jobs/{job_id}",
+                      headers={"sec-fetch-site": "cross-site"}).status_code == 403

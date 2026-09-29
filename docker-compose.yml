@@ -18,7 +18,7 @@ services:
     volumes:
       - ${LCT_ML_ARTIFACT_DIR:-./model_artifacts/strong_l336_aqe}:/model:ro
       - gallery_state:/gallery_state
-      - judge_exports:/judge_exports
+      - ${LCT_JUDGE_EXPORT_VOLUME:-judge_exports}:/judge_exports
     ports:
       - "127.0.0.1:${LCT_ML_PORT:-8001}:8001"
     healthcheck:

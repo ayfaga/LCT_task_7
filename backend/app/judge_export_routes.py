@@ -45,7 +45,8 @@ def _upstream_error(response: httpx.Response) -> HTTPException:
 
 
 @router.get("/config")
-def config() -> dict:
+def config(request: Request) -> dict:
+    _same_origin(request)
     return {"enabled": os.getenv("LCT_JUDGE_EXPORT_ENABLED") == "1",
             "input": "one ZIP with test_gallery.csv, test_query.csv and images/<image_id>.jpg",
             "downloads": sorted(DOWNLOADS)}
@@ -71,8 +72,9 @@ async def create_job(request: Request) -> dict:
 
 
 @router.get("/jobs/{job_id}")
-async def job_status(job_id: str) -> dict:
+async def job_status(job_id: str, request: Request) -> dict:
     _enabled()
+    _same_origin(request)
     _job_id(job_id)
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -85,8 +87,9 @@ async def job_status(job_id: str) -> dict:
 
 
 @router.get("/jobs/{job_id}/files/{name}")
-async def download(job_id: str, name: str) -> StreamingResponse:
+async def download(job_id: str, name: str, request: Request) -> StreamingResponse:
     _enabled()
+    _same_origin(request)
     _job_id(job_id)
     if name not in DOWNLOADS:
         raise HTTPException(status_code=404, detail="Export file not found")

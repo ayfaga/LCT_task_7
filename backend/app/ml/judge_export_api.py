@@ -28,6 +28,7 @@ JOB_ID = re.compile(r"[0-9a-f]{32}\Z")
 DOWNLOADS = {"submission.csv", "embeddings.npy", "candidates.csv", "manifest.json"}
 DISK_RESERVE_BYTES = 512 * 1024 * 1024
 COPY_CHUNK_BYTES = 1024 * 1024
+STATUS_EVERY_IMAGES = 16
 
 
 def create_router(runtime_loader):
@@ -71,7 +72,7 @@ def create_router(runtime_loader):
 
             def progress(split: str, done: int, total: int) -> None:
                 status["processed"][split] = done
-                if done == total or done % 80 == 0:
+                if done == total or done % STATUS_EVERY_IMAGES == 0:
                     write_status(path, status)
 
             result = build(path / "archive.zip", artifact_dir, path / "output",
