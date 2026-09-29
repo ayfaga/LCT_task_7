@@ -1335,16 +1335,30 @@ body.home-page { background: #edf2f5; color: #132636; }
 .judge-panel h2 { margin: 8px 0 15px; color: #14344a; }
 .judge-panel p { color: #526a7b; line-height: 1.6; }
 .judge-upload { display: flex; flex-direction: column; gap: 10px; margin: 24px 0 17px; padding: 20px; border: 2px dashed #b5d0db; border-radius: 16px; background: #f5fafb; }
-.judge-upload input { max-width: 100%; }
-.judge-upload small, .judge-note { color: #657d8b; line-height: 1.55; }
+.judge-upload input[type="file"] { width: 100%; max-width: 100%; min-width: 0; color: transparent; font-size: 0; cursor: pointer; }
+.judge-upload input[type="file"]::file-selector-button { width: 100%; margin: 0; padding: 10px 14px; border: 1px solid #a9cbd7; border-radius: 10px; background: #e4f2f5; color: #174f67; font: inherit; font-size: .84rem; font-weight: 800; cursor: pointer; transition: background .18s ease, border-color .18s ease, box-shadow .18s ease; }
+.judge-upload input[type="file"]:hover::file-selector-button { border-color: #6eafc1; background: #d4ebf1; box-shadow: 0 4px 12px rgba(25, 97, 123, .12); }
+.judge-upload input[type="file"]:focus-visible { outline: 3px solid #f4bd54; outline-offset: 4px; border-radius: 4px; }
+.judge-upload input[type="file"]:active::file-selector-button { background: #c5e2ea; }
+.judge-upload small, .judge-note { color: #657d8b; line-height: 1.55; overflow-wrap: anywhere; }
+.judge-mode { display: grid; gap: 10px; margin-top: 20px; padding: 15px 18px; border: 1px solid #c9dee6; border-radius: 15px; background: #f6fafb; }
+.judge-mode legend { padding: 0 6px; font-weight: 800; color: #173b50; }
+.judge-mode label { display: flex; align-items: center; gap: 8px; color: #284d61; cursor: pointer; }
+.judge-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.judge-fields .judge-upload { min-width: 0; margin: 12px 0; }
+.judge-image-field label { display: grid; gap: 7px; font-size: .9rem; font-weight: 700; color: #315b6f; }
+.judge-partial { display: flex; align-items: flex-start; gap: 9px; margin: 8px 0 18px; color: #526a7b; line-height: 1.5; }
+.judge-partial input { margin-top: 4px; flex: none; }
 .judge-button { border: 0; cursor: pointer; }
 .judge-button:disabled { opacity: .55; cursor: not-allowed; }
+.judge-abort { display: block; margin-top: 10px; padding: 9px 0; border: 0; background: transparent; color: #9b443f; text-decoration: underline; cursor: pointer; }
+.judge-abort[hidden] { display: none; }
 .judge-panel progress { width: 100%; height: 13px; accent-color: #1d7895; }
 .judge-downloads { display: grid; gap: 9px; margin-top: 20px; }
 .judge-downloads a { display: flex; flex-direction: column; gap: 4px; padding: 13px 16px; border: 1px solid #d3e8df; border-radius: 12px; background: #edf9f3; color: #125c3c; text-decoration: none; font-weight: 800; overflow-wrap: anywhere; }
 .judge-downloads small { font-weight: 500; color: #527568; }
 .judge-info { margin-top: 22px; padding: 18px 20px; border-radius: 15px; background: #eaf2f5; color: #3c5969; line-height: 1.6; }
-@media (max-width: 800px) { .judge-layout { grid-template-columns: 1fr; } .home-judge-card { flex-direction: column; align-items: stretch; } .home-judge-card .home-primary-link { width: fit-content; } }
+@media (max-width: 800px) { .judge-layout, .judge-fields { grid-template-columns: 1fr; } .home-judge-card { flex-direction: column; align-items: stretch; } .home-judge-card .home-primary-link { width: fit-content; } }
 
 /* The same visual top-10 appears for single and batch queries. */
 .solo-result-dialog { width: min(1080px, calc(100vw - 32px)); padding: clamp(18px, 3vw, 30px); }

@@ -17,6 +17,7 @@ from PIL import Image
 import app.judge_export_routes as gateway
 import app.ml.judge_export_api as worker
 from app.main import app as backend_app
+from ml.import_organizer_archive import ComponentInput, inspect_archive
 
 
 def organizer_zip() -> bytes:
@@ -48,7 +49,11 @@ def fixture_worker(tmp_path, monkeypatch):
                               encoder=object(), _inference_lock=Lock())
 
     def fake_build(source, artifact_dir, output, **kwargs):
-        assert source.is_file() and source.read_bytes() == organizer_zip()
+        if isinstance(source, ComponentInput):
+            _, report = inspect_archive(source)
+            assert report["gallery"] == 10 and report["query"] == 1
+        else:
+            assert source.is_file() and source.read_bytes() == organizer_zip()
         assert artifact_dir == artifacts and kwargs["encoder"] is runtime.encoder
         output.joinpath("submission").mkdir(parents=True)
         for name in worker.DOWNLOADS:
@@ -100,6 +105,35 @@ def test_worker_rejects_missing_bbox_csv(tmp_path, monkeypatch):
                        headers={"content-type": "text/plain"}).status_code == 415
 
 
+def test_worker_four_component_fields_and_mixed_sources(tmp_path, monkeypatch):
+    client = TestClient(fixture_worker(tmp_path, monkeypatch))
+    created = client.post("/internal/judge-exports/components")
+    assert created.status_code == 201
+    job_id = created.json()["job_id"]
+    with ZipFile(io.BytesIO(organizer_zip())) as original:
+        for split in ("gallery", "query"):
+            response = client.put(f"/internal/judge-exports/components/{job_id}/{split}/csv",
+                                  content=original.read(f"test_{split}.csv"))
+            assert response.status_code == 200, response.text
+        gallery_zip = io.BytesIO()
+        with ZipFile(gallery_zip, "w") as target:
+            for index in range(10):
+                name = f"images/{index:032x}.jpg"
+                target.writestr(f"nested/{index:032x}.jpg", original.read(name))
+        response = client.post(f"/internal/judge-exports/components/{job_id}/gallery/zip",
+                               content=gallery_zip.getvalue(), headers={"content-type": "application/zip"})
+        assert response.status_code == 201, response.text
+        response = client.put(f"/internal/judge-exports/components/{job_id}/query/images/{10:032x}",
+                              content=original.read(f"images/{10:032x}.jpg"))
+        assert response.status_code == 200, response.text
+    assert client.get(f"/internal/judge-exports/{job_id}/files/submission.csv").status_code == 409
+    response = client.post(f"/internal/judge-exports/components/{job_id}/start")
+    assert response.status_code == 202, response.text
+    completed = wait_complete(client, job_id)
+    assert completed["validation"]["roundtrip_top10_exact"]
+    assert client.get(f"/internal/judge-exports/{job_id}/files/submission.csv").status_code == 200
+
+
 def test_backend_browser_gateway_streams_same_job(tmp_path, monkeypatch):
     ml_app = fixture_worker(tmp_path, monkeypatch)
     original = httpx.AsyncClient
@@ -131,3 +165,40 @@ def test_backend_browser_gateway_streams_same_job(tmp_path, monkeypatch):
                       headers={"origin": "https://evil.test"}).status_code == 403
     assert client.get(f"/api/judge-export/jobs/{job_id}",
                       headers={"sec-fetch-site": "cross-site"}).status_code == 403
+
+
+def test_backend_gateway_four_component_fields(tmp_path, monkeypatch):
+    ml_app = fixture_worker(tmp_path, monkeypatch)
+    original_client = httpx.AsyncClient
+
+    def local_client(*args, **kwargs):
+        return original_client(transport=httpx.ASGITransport(app=ml_app), **kwargs)
+
+    monkeypatch.setattr(gateway.httpx, "AsyncClient", local_client)
+    client = TestClient(backend_app)
+    created = client.post("/api/judge-export/components", headers={"origin": "http://testserver"})
+    assert created.status_code == 201, created.text
+    job_id = created.json()["job_id"]
+    with ZipFile(io.BytesIO(organizer_zip())) as source:
+        for split in ("gallery", "query"):
+            response = client.put(f"/api/judge-export/components/{job_id}/{split}/csv",
+                                  content=source.read(f"test_{split}.csv"))
+            assert response.status_code == 200, response.text
+        response = client.post(f"/api/judge-export/components/{job_id}/gallery/zip",
+                               content=organizer_zip(), headers={"content-type": "application/zip"})
+        assert response.status_code == 201, response.text
+        response = client.put(f"/api/judge-export/components/{job_id}/query/images/{10:032x}",
+                              content=source.read(f"images/{10:032x}.jpg"))
+        assert response.status_code == 200, response.text
+    assert client.post(f"/api/judge-export/components/{job_id}/start",
+                       headers={"origin": "https://evil.test"}).status_code == 403
+    response = client.post(f"/api/judge-export/components/{job_id}/start")
+    assert response.status_code == 202, response.text
+    for _ in range(100):
+        state = client.get(f"/api/judge-export/jobs/{job_id}").json()
+        if state["state"] == "completed":
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("Component gateway export did not complete")
+    assert client.get(f"/api/judge-export/jobs/{job_id}/files/manifest.json").status_code == 200

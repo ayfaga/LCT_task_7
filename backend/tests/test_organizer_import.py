@@ -7,7 +7,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from ml.import_organizer_archive import encode_split, inspect_archive, open_source, validate_preprocessing
+from ml.import_organizer_archive import (ComponentInput, encode_split, inspect_archive,
+                                         open_source, validate_preprocessing)
 
 
 def make_archive(path, bad_bbox=False):
@@ -115,3 +116,70 @@ def test_same_bbox_contract_from_directory(tmp_path):
     with np.load(output, allow_pickle=False) as saved:
         assert saved["gallery_ids"].tolist() == [gallery_id]
         assert saved["embeddings"].shape == (1, 1024)
+
+
+def test_four_component_fields_mix_zip_folder_and_single_jpeg(tmp_path):
+    archive_path = tmp_path / "original.zip"
+    gallery_id = make_archive(archive_path)
+    second_gallery_id, query_id = "c" * 32, "b" * 32
+    gallery_csv = tmp_path / "gallery.csv"
+    query_csv = tmp_path / "query.csv"
+    gallery_csv.write_text("image_id,x,y,w,h\n" +
+                           f"{gallery_id},20,10,40,40\n{second_gallery_id},20,10,40,40\n")
+    query_csv.write_text(f"image_id,x,y,w,h\n{query_id},20,10,40,40\n")
+    gallery_zip = tmp_path / "gallery.zip"
+    query_folder = tmp_path / "query_images"
+    query_folder.mkdir()
+    with ZipFile(archive_path) as original:
+        image = original.read(f"images/{gallery_id}.jpg")
+        with ZipFile(gallery_zip, "w") as gallery:
+            gallery.writestr(f"nested/{gallery_id}.jpg", image)
+        (tmp_path / f"{second_gallery_id}.jpg").write_bytes(image)
+        (query_folder / f"{query_id}.jpg").write_bytes(original.read(f"images/{query_id}.jpg"))
+    spec = ComponentInput(gallery_csv, (gallery_zip, tmp_path / f"{second_gallery_id}.jpg"),
+                          query_csv, (query_folder,))
+    splits, report = inspect_archive(spec)
+    assert (report["gallery"], report["query"], report["partial"]) == (2, 1, False)
+    assert [row[0] for row in splits["gallery"][1]] == [gallery_id, second_gallery_id]
+    with open_source(spec) as source:
+        assert source.open(splits["gallery"][1][0][2]).read(2) == b"\xff\xd8"
+        assert source.open(splits["query"][1][0][2]).read(2) == b"\xff\xd8"
+
+
+def test_component_partial_requires_explicit_opt_in_and_filters_csv(tmp_path):
+    archive_path = tmp_path / "original.zip"
+    gallery_id = make_archive(archive_path)
+    missing_id, query_id = "c" * 32, "b" * 32
+    gallery_csv = tmp_path / "gallery.csv"
+    query_csv = tmp_path / "query.csv"
+    gallery_csv.write_text("image_id,x,y,w,h\n" +
+                           f"{gallery_id},20,10,40,40\n{missing_id},20,10,40,40\n")
+    query_csv.write_text(f"image_id,x,y,w,h\n{query_id},20,10,40,40\n")
+    gallery_zip = tmp_path / "gallery.zip"
+    query_zip = tmp_path / "query.zip"
+    with ZipFile(archive_path) as original:
+        with ZipFile(gallery_zip, "w") as target:
+            target.writestr(f"{gallery_id}.jpg", original.read(f"images/{gallery_id}.jpg"))
+        with ZipFile(query_zip, "w") as target:
+            target.writestr(f"{query_id}.jpg", original.read(f"images/{query_id}.jpg"))
+    spec = ComponentInput(gallery_csv, (gallery_zip,), query_csv, (query_zip,))
+    with pytest.raises(ValueError, match="missing JPEG"):
+        inspect_archive(spec)
+    splits, report = inspect_archive(spec, allow_partial=True)
+    assert report["partial"] and report["missing_gallery"] == 1
+    assert missing_id not in splits["gallery"][0].decode()
+
+
+def test_component_duplicate_images_fail_closed(tmp_path):
+    archive_path = tmp_path / "original.zip"
+    gallery_id = make_archive(archive_path)
+    with ZipFile(archive_path) as original:
+        gallery_image = tmp_path / f"{gallery_id}.jpg"
+        gallery_image.write_bytes(original.read(f"images/{gallery_id}.jpg"))
+        gallery_csv = tmp_path / "gallery.csv"
+        gallery_csv.write_bytes(original.read("test_gallery.csv"))
+        query_csv = tmp_path / "query.csv"
+        query_csv.write_bytes(original.read("test_query.csv"))
+    spec = ComponentInput(gallery_csv, (gallery_image, gallery_image), query_csv, (archive_path,))
+    with pytest.raises(ValueError, match="Duplicate image_id"):
+        inspect_archive(spec)

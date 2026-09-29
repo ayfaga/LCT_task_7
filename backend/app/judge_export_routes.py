@@ -15,6 +15,7 @@ from .ml_gateway import ml_url
 
 router = APIRouter(prefix="/api/judge-export", tags=["jury export"])
 JOB_ID = re.compile(r"[0-9a-f]{32}\Z")
+IMAGE_ID = JOB_ID
 DOWNLOADS = {"submission.csv", "embeddings.npy", "candidates.csv", "manifest.json"}
 
 
@@ -36,6 +37,11 @@ def _job_id(value: str) -> None:
         raise HTTPException(status_code=404, detail="Export job not found")
 
 
+def _split(value: str) -> None:
+    if value not in {"gallery", "query"}:
+        raise HTTPException(status_code=404, detail="Unknown split")
+
+
 def _upstream_error(response: httpx.Response) -> HTTPException:
     try:
         detail = response.json().get("detail", "Export service failed")
@@ -48,8 +54,23 @@ def _upstream_error(response: httpx.Response) -> HTTPException:
 def config(request: Request) -> dict:
     _same_origin(request)
     return {"enabled": os.getenv("LCT_JUDGE_EXPORT_ENABLED") == "1",
-            "input": "one ZIP with test_gallery.csv, test_query.csv and images/<image_id>.jpg",
+            "input": "combined ZIP, or four separate gallery/query CSV and image fields",
             "downloads": sorted(DOWNLOADS)}
+
+
+async def _relay(request: Request, method: str, suffix: str,
+                 content_type: str | None = None) -> dict:
+    timeout = httpx.Timeout(connect=5.0, read=3600.0, write=3600.0, pool=5.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.request(method, f"{ml_url()}/internal/judge-exports{suffix}",
+                                            content=request.stream() if content_type else None,
+                                            headers={"content-type": content_type} if content_type else None)
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=503, detail="ML export service is unavailable") from exc
+    if response.status_code not in {200, 201, 202}:
+        raise _upstream_error(response)
+    return response.json()
 
 
 @router.post("/jobs", status_code=202)
@@ -58,17 +79,62 @@ async def create_job(request: Request) -> dict:
     _same_origin(request)
     if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/zip":
         raise HTTPException(status_code=415, detail="Send one ZIP as application/zip")
-    try:
-        timeout = httpx.Timeout(connect=5.0, read=3600.0, write=3600.0, pool=5.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(f"{ml_url()}/internal/judge-exports",
-                                         content=request.stream(),
-                                         headers={"content-type": "application/zip"})
-    except httpx.RequestError as exc:
-        raise HTTPException(status_code=503, detail="ML export service is unavailable") from exc
-    if response.status_code != 202:
-        raise _upstream_error(response)
-    return response.json()
+    return await _relay(request, "POST", "", "application/zip")
+
+
+@router.post("/components", status_code=201)
+async def create_components(request: Request) -> dict:
+    _enabled()
+    _same_origin(request)
+    return await _relay(request, "POST", "/components")
+
+
+@router.put("/components/{job_id}/{split}/csv")
+async def upload_component_csv(job_id: str, split: str, request: Request) -> dict:
+    _enabled()
+    _same_origin(request)
+    _job_id(job_id)
+    _split(split)
+    return await _relay(request, "PUT", f"/components/{job_id}/{split}/csv", "text/csv")
+
+
+@router.post("/components/{job_id}/{split}/zip", status_code=201)
+async def upload_component_zip(job_id: str, split: str, request: Request) -> dict:
+    _enabled()
+    _same_origin(request)
+    _job_id(job_id)
+    _split(split)
+    if request.headers.get("content-type", "").split(";", 1)[0].lower() != "application/zip":
+        raise HTTPException(status_code=415, detail="Send ZIP as application/zip")
+    return await _relay(request, "POST", f"/components/{job_id}/{split}/zip", "application/zip")
+
+
+@router.put("/components/{job_id}/{split}/images/{image_id}")
+async def upload_component_image(job_id: str, split: str, image_id: str, request: Request) -> dict:
+    _enabled()
+    _same_origin(request)
+    _job_id(job_id)
+    _split(split)
+    if not IMAGE_ID.fullmatch(image_id):
+        raise HTTPException(status_code=404, detail="Invalid image_id")
+    return await _relay(request, "PUT", f"/components/{job_id}/{split}/images/{image_id}", "image/jpeg")
+
+
+@router.post("/components/{job_id}/start", status_code=202)
+async def start_components(job_id: str, request: Request) -> dict:
+    _enabled()
+    _same_origin(request)
+    _job_id(job_id)
+    partial = request.query_params.get("allow_partial") == "true"
+    return await _relay(request, "POST", f"/components/{job_id}/start?allow_partial={str(partial).lower()}")
+
+
+@router.post("/components/{job_id}/abort")
+async def abort_components(job_id: str, request: Request) -> dict:
+    _enabled()
+    _same_origin(request)
+    _job_id(job_id)
+    return await _relay(request, "POST", f"/components/{job_id}/abort")
 
 
 @router.get("/jobs/{job_id}")
