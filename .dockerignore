@@ -1,5 +1,13 @@
 .git/
 .venv/
+model_artifacts/
+gallery_state/
+uploads/
+judge_exports/
+docs/
+repro/
+*.pdf
+*.pptx
 backend/.venv/
 backend/local.db
 backend/tests/

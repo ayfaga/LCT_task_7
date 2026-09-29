@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Экспорт для жюри · Фалькон</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body class="home-page">
+  <div class="home-shell judge-shell">
+    <nav class="home-nav" aria-label="Навигация">
+      <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◈</span><span>ФАЛЬКОН <small>Поиск автомобилей</small></span></a>
+      <a class="judge-back" href="/">← К поиску</a>
+    </nav>
+    <header class="judge-hero">
+      <span class="home-kicker">ВОСПРОИЗВОДИМАЯ ПРОВЕРКА</span>
+      <h1>Экспорт для жюри</h1>
+      <p>Отдельный режим: исходные кадры и координаты BBox превращаются в три проверяемых файла сдачи. Он не добавляет тестовые изображения в общую галерею сайта.</p>
+    </header>
+    <main class="judge-layout">
+      <section class="judge-panel" aria-labelledby="inputTitle">
+        <span class="section-kicker">Шаг 1 · Входные данные</span>
+        <h2 id="inputTitle">Выберите архив организаторов</h2>
+        <p>ZIP должен содержать <code>test_gallery.csv</code>, <code>test_query.csv</code> и <code>images/&lt;image_id&gt;.jpg</code>. В обеих таблицах обязательны <code>image_id,x,y,w,h</code>. CSV остаются в исходном порядке; BBox применяется к исходному кадру.</p>
+        <label class="judge-upload" for="judgeArchive"><strong>ZIP с исходными JPEG и двумя CSV</strong><input id="judgeArchive" type="file" accept=".zip,application/zip" /><small>Большой файл передаётся потоком. Убедитесь, что на сервере хватает диска; для многогигабайтных данных надёжнее консольная команда из документации.</small></label>
+        <button id="judgeStart" class="home-primary-link judge-button" type="button" disabled>Создать файлы сдачи <span aria-hidden="true">→</span></button>
+        <p class="judge-note">Экспорт выполняется локально, без загрузки данных во внешние сервисы. Одновременно запускается только одна задача; до её окончания не закрывайте сервер.</p>
+      </section>
+      <section class="judge-panel" aria-labelledby="outputTitle">
+        <span class="section-kicker">Шаг 2 · Проверка и результат</span>
+        <h2 id="outputTitle">Состояние экспорта</h2>
+        <p id="judgeStatus" role="status" aria-live="polite">Проверяем доступность режима…</p>
+        <progress id="judgeProgress" max="100" value="0" hidden></progress>
+        <p id="judgeDetails" class="judge-note"></p>
+        <div id="judgeDownloads" class="judge-downloads" hidden>
+          <a data-file="embeddings.npy" href="#">Скачать embeddings.npy <small>Все query, затем gallery, в порядке CSV</small></a>
+          <a data-file="submission.csv" href="#">Скачать submission.csv <small>Top-10 ID галереи для каждого запроса</small></a>
+          <a data-file="candidates.csv" href="#">Скачать candidates.csv <small>Принятые кандидаты или пустой отказ</small></a>
+          <a data-file="manifest.json" href="#">Скачать manifest.json <small>Версии, размеры, SHA256 и самопроверка</small></a>
+        </div>
+      </section>
+    </main>
+    <section class="judge-info" aria-label="Ограничения">
+      <strong>Важно:</strong> поле <code>confidence</code> — исходное cosine-сходство, а не вероятность. Файлы не содержат скрытых меток и не являются заявлением о результате на закрытом тесте. Консольный путь и Docker-команды описаны в <code>docs/JUDGE_EXPORT.md</code> репозитория.
+    </section>
+  </div>
+  <script src="/static/judge_export.js?v=20260929-1"></script>
+</body>
+</html>

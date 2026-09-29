@@ -51,67 +51,14 @@ function validateSelection() {
   const archive = galleryArchive.files[0];
   const manifest = galleryManifest.files[0];
   if (Boolean(images.length) === Boolean(archive)) throw new Error('Выберите либо фотографии, либо один ZIP-архив.');
-  if (images.length > 200) throw new Error('В одной партии не более 200 изображений.');
-  if (images.some((file) => !/\.(jpe?g|png)$/i.test(file.name) || file.size > 20 * 1024 * 1024)) throw new Error('Каждое изображение должно быть JPG/PNG размером до 20 МиБ.');
-  if (images.reduce((sum, file) => sum + file.size, 0) > 200 * 1024 * 1024) throw new Error('Размер партии не должен превышать 200 МиБ.');
-  if (archive && (archive.size > 100 * 1024 * 1024 || !/\.zip$/i.test(archive.name))) throw new Error('Нужен ZIP размером до 100 МиБ.');
-  if (manifest && (manifest.size > 1024 * 1024 || !/\.csv$/i.test(manifest.name))) throw new Error('Нужен CSV размером до 1 МиБ.');
+  if (images.some((file) => !/\.(jpe?g|png)$/i.test(file.name))) throw new Error('Каждое изображение должно быть JPG/PNG.');
+  if (archive && !/\.zip$/i.test(archive.name)) throw new Error('Нужен ZIP-архив.');
+  if (manifest && !/\.csv$/i.test(manifest.name)) throw new Error('Нужен CSV-файл.');
   if (images.length && manifest) {
     const names = images.map((file) => file.name);
     if (new Set(names).size !== names.length) throw new Error('Имена изображений в партии не должны повторяться.');
   }
   return { images, archive, manifest };
-}
-
-function csvRows(text) {
-  const data = String(text).replace(/^\uFEFF/, '');
-  const header = data.split(/\r?\n/, 1)[0];
-  const delimiter = header.includes(';') ? ';' : header.includes('\t') ? '\t' : ',';
-  const result = []; let row = [], cell = '', quoted = false;
-  for (let i = 0; i < data.length; i += 1) {
-    const char = data[i];
-    if (char === '"') { if (quoted && data[i + 1] === '"') { cell += '"'; i += 1; } else quoted = !quoted; }
-    else if (!quoted && char === delimiter) { row.push(cell.trim()); cell = ''; }
-    else if (!quoted && (char === '\n' || char === '\r')) {
-      if (char === '\r' && data[i + 1] === '\n') i += 1;
-      row.push(cell.trim()); cell = '';
-      if (row.some(Boolean)) result.push(row);
-      row = [];
-    } else cell += char;
-  }
-  if (quoted) throw new Error('В CSV не закрыта кавычка.');
-  row.push(cell.trim()); if (row.some(Boolean)) result.push(row);
-  return result;
-}
-
-function quoteCsv(value) { return `"${String(value).replace(/"/g, '""')}"`; }
-
-async function normalizeManifest(file, images, archive) {
-  if (!file) return null;
-  const table = csvRows(await file.text());
-  if (table.length < 2) throw new Error('BBox CSV пуст.');
-  const headers = table[0].map((cell) => cell.toLowerCase());
-  if (headers.includes('filename')) {
-    if (['x', 'y', 'w', 'h'].some((key) => !headers.includes(key))) throw new Error('В manifest CSV нужны координаты x,y,w,h.');
-    return file;
-  }
-  if (!headers.includes('image_id') || ['x', 'y', 'w', 'h'].some((key) => !headers.includes(key))) {
-    throw new Error('BBox CSV должен содержать image_id,x,y,w,h или filename,gallery_id,x,y,w,h.');
-  }
-  if (archive) throw new Error('Для ZIP нужен manifest.csv с колонкой filename. Для CSV организатора выберите отдельные JPG-файлы.');
-  const position = Object.fromEntries(headers.map((name, index) => [name, index]));
-  const used = new Set();
-  const lines = ['filename,gallery_id,x,y,w,h'];
-  for (const values of table.slice(1)) {
-    if (values.length !== headers.length) throw new Error('Число колонок в CSV не совпадает с заголовком.');
-    const id = values[position.image_id];
-    const image = images.find((item) => item.name.toLowerCase() === id.toLowerCase()) || images.find((item) => item.name.replace(/\.[^.]+$/, '').toLowerCase() === id.toLowerCase());
-    if (!image || used.has(image.name)) throw new Error(`Не удалось однозначно сопоставить image_id «${id}» с загруженным файлом.`);
-    used.add(image.name);
-    lines.push([image.name, id, ...['x', 'y', 'w', 'h'].map((key) => values[position[key]])].map(quoteCsv).join(','));
-  }
-  if (used.size !== images.length) throw new Error('Для каждого загруженного кадра нужна строка BBox CSV.');
-  return new File([lines.join('\n') + '\n'], 'manifest.csv', { type: 'text/csv' });
 }
 
 async function pollImport() {
@@ -154,8 +101,7 @@ uploadGalleryBtn.addEventListener('click', async () => {
     const form = new FormData();
     selection.images.forEach((file) => form.append('images', file));
     if (selection.archive) form.append('archive', selection.archive);
-    const normalizedManifest = await normalizeManifest(selection.manifest, selection.images, selection.archive);
-    if (normalizedManifest) form.append('manifest', normalizedManifest);
+    if (selection.manifest) form.append('manifest', selection.manifest);
     await apiJson('/api/common-gallery/images', { method: 'POST', body: form });
     galleryImages.value = ''; galleryArchive.value = ''; galleryManifest.value = ''; summarizeSelection();
     await pollImport();

@@ -12,9 +12,13 @@ services:
       OMP_NUM_THREADS: ${LCT_TORCH_THREADS:-4}
       MKL_NUM_THREADS: ${LCT_TORCH_THREADS:-4}
       LCT_ML_USER_GALLERY_DIR: /gallery_state
+      LCT_JUDGE_EXPORT_ENABLED: ${LCT_JUDGE_EXPORT_ENABLED:-0}
+      LCT_JUDGE_EXPORT_DIR: /judge_exports
+      LCT_JUDGE_EXPORT_BATCH_SIZE: ${LCT_JUDGE_EXPORT_BATCH_SIZE:-4}
     volumes:
-      - ${LCT_ML_ARTIFACT_DIR:-./model_artifacts/joint_l336}:/model:ro
+      - ${LCT_ML_ARTIFACT_DIR:-./model_artifacts/strong_l336_aqe}:/model:ro
       - gallery_state:/gallery_state
+      - ${LCT_JUDGE_EXPORT_VOLUME:-judge_exports}:/judge_exports
     ports:
       - "127.0.0.1:${LCT_ML_PORT:-8001}:8001"
     healthcheck:
@@ -34,6 +38,7 @@ services:
       LCT_ML_SERVICE_URL: http://ml:8001
       LCT_UPLOAD_DIR: /state/uploads
       LCT_GALLERY_STATE_DIR: /gallery_state
+      LCT_JUDGE_EXPORT_ENABLED: ${LCT_JUDGE_EXPORT_ENABLED:-0}
     volumes:
       - backend_state:/state
       - gallery_state:/gallery_state
@@ -51,3 +56,4 @@ services:
 volumes:
   backend_state:
   gallery_state:
+  judge_exports:

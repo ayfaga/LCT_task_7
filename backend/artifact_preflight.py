@@ -23,6 +23,24 @@ def verify_artifacts(artifact_dir: Path, gallery_path: Path | None = None) -> di
         expected_sha = manifest["model_sha256"]
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise ArtifactError(f"Invalid model manifest: {manifest_path}") from exc
+    calibration_path = artifact_dir / "calibration_manifest.json"
+    if calibration_path.is_file():
+        try:
+            calibration = json.loads(calibration_path.read_text(encoding="utf-8"))
+            policy_name = calibration["policy_file"]
+            policy_sha = calibration["policy_sha256"]
+            if calibration["model_version"] != manifest["model_version"]:
+                raise ValueError("Model/policy versions differ")
+            if not isinstance(policy_name, str) or Path(policy_name).name != policy_name:
+                raise ValueError("Invalid policy filename")
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise ArtifactError(f"Invalid calibration manifest: {calibration_path}") from exc
+        policy = artifact_dir / policy_name
+        if not policy.is_file():
+            raise ArtifactError(f"Refusal policy is missing: {policy}")
+        policy_digest = hashlib.sha256(policy.read_bytes()).hexdigest()
+        if policy_digest != policy_sha:
+            raise ArtifactError(f"Refusal policy SHA256 mismatch: {policy}")
     if not isinstance(filename, str) or Path(filename).name != filename:
         raise ArtifactError("Model manifest has an invalid model_file")
     weight = artifact_dir / filename

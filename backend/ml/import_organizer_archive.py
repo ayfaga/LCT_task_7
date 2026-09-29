@@ -8,12 +8,16 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import io
 import json
 import re
 import sys
 import time
+from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Callable
 from zipfile import ZipFile
 
 import numpy as np
@@ -33,6 +37,63 @@ MAX_PIXELS = 50_000_000
 MAX_CSV_BYTES = 8 * 1024 * 1024
 
 
+class DirectorySource:
+    """Read the same organizer layout from a folder without copying it to ZIP."""
+
+    def __init__(self, root: Path):
+        self.root = root.resolve()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def _path(self, name: str) -> Path:
+        if name not in {"test_gallery.csv", "test_query.csv"} and not re.fullmatch(
+                r"images/[0-9a-f]{32}\.jpg", name):
+            raise KeyError(name)
+        path = self.root / name
+        if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(self.root):
+            raise KeyError(name)
+        return path
+
+    def getinfo(self, name: str):
+        path = self._path(name)
+        return SimpleNamespace(filename=name, file_size=path.stat().st_size, flag_bits=0)
+
+    def read(self, item) -> bytes:
+        return self._path(item.filename if hasattr(item, "filename") else item).read_bytes()
+
+    def open(self, name: str):
+        return self._path(name).open("rb")
+
+
+def open_source(path: Path):
+    if path.is_dir():
+        return DirectorySource(path)
+    if path.is_file():
+        return ZipFile(path)
+    raise FileNotFoundError(f"Organizer input not found: {path}")
+
+
+def input_sha256(path: Path, splits: dict) -> str:
+    if path.is_file():
+        return file_sha256(path)
+    digest = hashlib.sha256()
+    with open_source(path) as source:
+        for name in ("gallery", "query"):
+            csv_name = f"test_{name}.csv"
+            digest.update(csv_name.encode() + b"\0")
+            digest.update(splits[name][0])
+            for _, _, member in splits[name][1]:
+                digest.update(member.encode() + b"\0")
+                with source.open(member) as stream:
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                        digest.update(chunk)
+    return digest.hexdigest()
+
+
 def validate_preprocessing(manifest: dict) -> None:
     implementation = Path(__file__).resolve().parents[1] / "app/ml/preprocessing.py"
     if (manifest.get("preprocessing_version") != VERSION
@@ -43,7 +104,7 @@ def validate_preprocessing(manifest: dict) -> None:
         raise ValueError("Organizer importer requires the unchanged joint L336 preprocessing contract")
 
 
-def read_records(archive: ZipFile, csv_name: str) -> tuple[bytes, list[tuple[str, tuple[int, int, int, int], str]]]:
+def read_records(archive: ZipFile | DirectorySource, csv_name: str) -> tuple[bytes, list[tuple[str, tuple[int, int, int, int], str]]]:
     try:
         csv_info = archive.getinfo(csv_name)
     except KeyError as error:
@@ -82,10 +143,11 @@ def read_records(archive: ZipFile, csv_name: str) -> tuple[bytes, list[tuple[str
 
 
 def inspect_archive(path: Path) -> tuple[dict, dict]:
-    with ZipFile(path) as archive:
-        names = [info.filename for info in archive.infolist()]
-        if len(names) != len(set(names)):
-            raise ValueError("Archive has duplicate member names")
+    with open_source(path) as archive:
+        if isinstance(archive, ZipFile):
+            names = [info.filename for info in archive.infolist()]
+            if len(names) != len(set(names)):
+                raise ValueError("Archive has duplicate member names")
         gallery_csv, gallery = read_records(archive, "test_gallery.csv")
         query_csv, query = read_records(archive, "test_query.csv")
     if set(row[0] for row in gallery) & set(row[0] for row in query):
@@ -96,8 +158,10 @@ def inspect_archive(path: Path) -> tuple[dict, dict]:
     }
 
 
-def encode_split(archive: ZipFile, records: list[tuple[str, tuple[int, int, int, int], str]],
-                 encoder: E2Encoder, manifest: dict, output: Path, batch_size: int, split: str) -> None:
+def encode_split(archive: ZipFile | DirectorySource, records: list[tuple[str, tuple[int, int, int, int], str]],
+                 encoder: E2Encoder, manifest: dict, output: Path, batch_size: int, split: str,
+                 progress: Callable[[str, int, int], None] | None = None,
+                 inference_lock=None) -> None:
     vectors = []
     for start in range(0, len(records), batch_size):
         crops = []
@@ -110,7 +174,10 @@ def encode_split(archive: ZipFile, records: list[tuple[str, tuple[int, int, int,
                 if image.format != "JPEG" or image.width * image.height > MAX_PIXELS:
                     raise ValueError(f"{member}: invalid JPEG format/dimensions")
                 crops.append(crop_bbox(image, bbox))
-        vectors.append(encoder.embed_crops(crops, batch_size))
+        with inference_lock if inference_lock is not None else nullcontext():
+            vectors.append(encoder.embed_crops(crops, batch_size))
+        if progress is not None:
+            progress(split, start + len(crops), len(records))
         if (start // batch_size + 1) % 20 == 0 or start + len(crops) == len(records):
             print(json.dumps({"split": split, "embedded": start + len(crops), "total": len(records)}), flush=True)
     embeddings = np.concatenate(vectors)
@@ -123,7 +190,10 @@ def encode_split(archive: ZipFile, records: list[tuple[str, tuple[int, int, int,
 
 
 def build(archive_path: Path, artifact_dir: Path, output: Path, device: str = "cpu",
-          batch_size: int = 4, limit_per_split: int = 0) -> dict:
+          batch_size: int = 4, limit_per_split: int = 0,
+          encoder: E2Encoder | None = None,
+          progress: Callable[[str, int, int], None] | None = None,
+          inference_lock=None) -> dict:
     if batch_size < 1 or limit_per_split < 0:
         raise ValueError("Invalid batch size or limit")
     if output.exists() and any(output.iterdir()):
@@ -135,10 +205,10 @@ def build(archive_path: Path, artifact_dir: Path, output: Path, device: str = "c
         raise ValueError("Need at least 10 gallery and one query record")
     manifest = json.loads((artifact_dir / "model_manifest.json").read_text())
     validate_preprocessing(manifest)
-    encoder = E2Encoder(artifact_dir / manifest["model_file"], manifest["model_sha256"], device)
+    encoder = encoder or E2Encoder(artifact_dir / manifest["model_file"], manifest["model_sha256"], device)
     output.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
-    with ZipFile(archive_path) as archive:
+    with open_source(archive_path) as archive:
         for name in ("gallery", "query"):
             raw, records = splits[name]
             # A smoke run writes only the selected records, never the original full CSV.
@@ -148,12 +218,17 @@ def build(archive_path: Path, artifact_dir: Path, output: Path, device: str = "c
                 (output / f"test_{name}.csv").write_text("\n".join(lines) + "\n")
             else:
                 (output / f"test_{name}.csv").write_bytes(raw)
-            encode_split(archive, records, encoder, manifest, output / f"test_{name}.npz", batch_size, name)
+            encode_split(archive, records, encoder, manifest, output / f"test_{name}.npz",
+                         batch_size, name, progress, inference_lock)
     exported = export(artifact_dir, output / "test_query.csv", output / "test_gallery.csv",
                       output / "test_query.npz", output / "test_gallery.npz", output / "submission")
+    source_hash = input_sha256(archive_path, splits)
     result = {
         "status": "completed", "scope": "SMOKE ONLY; not a full submission" if limit_per_split else "full organizer test archive",
-        "archive_sha256": file_sha256(archive_path), "model_version": manifest["model_version"],
+        "archive_sha256": source_hash if archive_path.is_file() else None,
+        "input_sha256": source_hash,
+        "input_kind": "directory" if archive_path.is_dir() else "zip",
+        "model_version": manifest["model_version"],
         "model_sha256": manifest["model_sha256"], "archive_records": inspection,
         "processed": {name: len(records) for name, (_, records) in splits.items()},
         "gallery_npz": str(output / "test_gallery.npz"),
@@ -169,7 +244,7 @@ def build(archive_path: Path, artifact_dir: Path, output: Path, device: str = "c
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--archive", required=True, type=Path)
+    parser.add_argument("--archive", "--input", dest="archive", required=True, type=Path)
     parser.add_argument("--artifact-dir", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--device", default="cpu")

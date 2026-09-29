@@ -6,8 +6,11 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from ml.export_test_hybrid import export
+from app.ml.boosting import HybridBoostingPolicy
+from app.ml.runtime import MLRuntime
 
 
 def _csv(path: Path, ids: list[str]) -> None:
@@ -17,7 +20,8 @@ def _csv(path: Path, ids: list[str]) -> None:
         writer.writerows((image_id,) for image_id in ids)
 
 
-def test_exact_top10_and_hybrid_rejection_roundtrip(tmp_path):
+@pytest.mark.parametrize("batch_ranking", ["exact_cosine", "transductive_aqe_k5_alpha025"])
+def test_exact_top10_and_hybrid_rejection_roundtrip(tmp_path, batch_ranking):
     artifacts = tmp_path / "artifacts"
     artifacts.mkdir()
     policy = {
@@ -36,6 +40,7 @@ def test_exact_top10_and_hybrid_rejection_roundtrip(tmp_path):
     policy_path.write_text(json.dumps(policy))
     (artifacts / "model_manifest.json").write_text(json.dumps({
         "bundle_version": "fixture-bundle", "model_version": "fixture-e2", "model_sha256": "fixture-sha",
+        "batch_ranking": batch_ranking,
     }))
     (artifacts / "calibration_manifest.json").write_text(json.dumps({
         "model_version": "fixture-e2", "policy_kind": "hybrid_hist_gradient_boosting",
@@ -62,6 +67,32 @@ def test_exact_top10_and_hybrid_rejection_roundtrip(tmp_path):
     assert result["validation"]["embedding_shape"] == [13, 1024]
     assert result["validation"]["candidates_rows"] == 3
     assert result["validation"]["empty_answers"] == 1
+    assert result["ranking_algorithm"] == batch_ranking
+    saved = np.load(tmp_path / "output" / "embeddings.npy", allow_pickle=False)
+    if batch_ranking == "transductive_aqe_k5_alpha025":
+        assert result["embeddings_semantics"] == "transductive_aqe_expanded"
+        assert not np.array_equal(saved[:3], query_vectors)
+    with (tmp_path / "output" / "submission.csv").open(newline="") as stream:
+        submission = list(csv.reader(stream))[1:]
+    with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+        scores = saved[:3] @ saved[3:].T
+    for index, row in enumerate(submission):
+        expected = np.argsort(-scores[index], kind="stable")[:10]
+        assert row == [query_ids[index], *np.asarray(gallery_ids)[expected]]
+    runtime = object.__new__(MLRuntime)
+    runtime.model_version = "fixture-e2"
+    runtime.batch_ranking = batch_ranking
+    runtime.gallery_ids = np.asarray(gallery_ids)
+    runtime.gallery_embeddings = gallery_vectors
+    runtime.policy = HybridBoostingPolicy.load(policy_path, "fixture-e2")
+    api_rows = runtime.search_batch(query_vectors, topk=10)
+    with (tmp_path / "output" / "candidates.csv").open(newline="") as stream:
+        candidate_rows = list(csv.DictReader(stream))
+    for index, api_row in enumerate(api_rows):
+        assert [item["gallery_id"] for item in api_row["ranked"]] == submission[index][1:]
+        expected_accepted = [row["gallery_id"] for row in candidate_rows
+                             if row["query_id"] == query_ids[index] and row["gallery_id"]]
+        assert [item["gallery_id"] for item in api_row["accepted"]] == expected_accepted
     with (tmp_path / "output" / "candidates.csv").open(newline="") as stream:
         rows = list(csv.DictReader(stream))
     assert rows[0]["gallery_id"] == "g0"

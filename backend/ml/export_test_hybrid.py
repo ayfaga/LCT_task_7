@@ -18,6 +18,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.ml.boosting import HybridBoostingPolicy  # noqa: E402
+from app.ml.aqe import expand_transductive  # noqa: E402
 
 
 def sha256(path: Path) -> str:
@@ -58,6 +59,9 @@ def export(artifact_dir: Path, query_csv: Path, gallery_csv: Path,
     if output.exists() and any(output.iterdir()):
         raise FileExistsError(f"Output is not empty: {output}")
     model = json.loads((artifact_dir / "model_manifest.json").read_text())
+    ranking = model.get("batch_ranking", "exact_cosine")
+    if ranking not in {"exact_cosine", "transductive_aqe_k5_alpha025"}:
+        raise ValueError(f"Unsupported batch ranking algorithm: {ranking}")
     calibration = json.loads((artifact_dir / "calibration_manifest.json").read_text())
     if calibration["model_version"] != model["model_version"]:
         raise ValueError("Model/policy version mismatch")
@@ -74,29 +78,44 @@ def export(artifact_dir: Path, query_csv: Path, gallery_csv: Path,
         raise ValueError("Need at least 10 gallery IDs and disjoint query/gallery IDs")
     queries = _load_features(query_features, query_ids, model)
     gallery = _load_features(gallery_features, gallery_ids, model)
-    embeddings = np.concatenate((queries, gallery)).astype(np.float32, copy=False)
+    if ranking == "transductive_aqe_k5_alpha025" and len(queries) == 1:
+        ranking = "exact_cosine"
+    if ranking == "transductive_aqe_k5_alpha025":
+        ranked_queries, ranked_gallery = expand_transductive(queries, gallery)
+    else:
+        ranked_queries, ranked_gallery = queries, gallery
+    # Saving the expanded vectors keeps submission.csv and a jury-side
+    # cosine recomputation from embeddings.npy in the same ranking space.
+    embeddings = np.concatenate((ranked_queries, ranked_gallery)).astype(np.float32, copy=False)
     # macOS Accelerate can report spurious FP flags even for finite dot products.
     with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
-        scores = queries @ gallery.T
-    if not np.isfinite(scores).all():
-        raise ValueError("Cosine matrix contains non-finite values")
+        scores = ranked_queries @ ranked_gallery.T
+        raw_scores = queries @ gallery.T
+    if not np.isfinite(scores).all() or not np.isfinite(raw_scores).all():
+        raise ValueError("Ranking or refusal cosine matrix contains non-finite values")
     order = np.argsort(-scores, axis=1, kind="stable")[:, :10]
-    top_scores = np.take_along_axis(scores, order, axis=1)
-    accepted = policy.accepted(top_scores)
+    raw_top_scores = np.take_along_axis(raw_scores, order, axis=1)
+    # The portable booster expects its cosine inputs sorted. AQE ranking can
+    # disagree with raw cosine, so score in cosine order then restore AQE order.
+    raw_order = np.argsort(-raw_top_scores, axis=1, kind="stable")
+    cosine_sorted = np.take_along_axis(raw_top_scores, raw_order, axis=1)
+    accepted_sorted = policy.accepted(cosine_sorted)
+    accepted = np.zeros_like(accepted_sorted)
+    np.put_along_axis(accepted, raw_order, accepted_sorted, axis=1)
 
     output.mkdir(parents=True, exist_ok=True)
     np.save(output / "embeddings.npy", embeddings, allow_pickle=False)
     with (output / "submission.csv").open("w", newline="") as stream:
         writer = csv.writer(stream)
         writer.writerow(["query_id"] + [f"gallery_id_{rank}" for rank in range(1, 11)])
-        for query_id, ranking in zip(query_ids, order):
-            writer.writerow([query_id, *gallery_ids[ranking]])
+        for query_id, ranked_indices in zip(query_ids, order):
+            writer.writerow([query_id, *gallery_ids[ranked_indices]])
     with (output / "candidates.csv").open("w", newline="") as stream:
         writer = csv.writer(stream)
         writer.writerow(["query_id", "gallery_id", "confidence"])
-        for query_id, ranking, row_scores, row_accepted in zip(query_ids, order, top_scores, accepted):
+        for query_id, ranked_indices, row_scores, row_accepted in zip(query_ids, order, raw_top_scores, accepted):
             if row_accepted.any():
-                for gallery_index, cosine in zip(ranking[row_accepted], row_scores[row_accepted]):
+                for gallery_index, cosine in zip(ranked_indices[row_accepted], row_scores[row_accepted]):
                     writer.writerow([query_id, gallery_ids[gallery_index], repr(float(cosine))])
             else:
                 writer.writerow([query_id, "", ""])
@@ -111,22 +130,26 @@ def export(artifact_dir: Path, query_csv: Path, gallery_csv: Path,
         raise AssertionError("Exported embeddings yielded non-finite scores")
     expected_order = np.argsort(-recomputed, axis=1, kind="stable")[:, :10]
     if not np.array_equal(expected_order, order):
-        raise AssertionError("Exported embedding ranking changed")
-    recomputed_top = np.take_along_axis(recomputed, expected_order, axis=1)
-    expected_accept = policy.accepted(recomputed_top)
+        raise AssertionError("Saved embeddings do not reproduce submission ranking")
+    expected_raw_top = np.take_along_axis(raw_scores, expected_order, axis=1)
+    expected_raw_order = np.argsort(-expected_raw_top, axis=1, kind="stable")
+    expected_accepted_sorted = policy.accepted(
+        np.take_along_axis(expected_raw_top, expected_raw_order, axis=1))
+    expected_accept = np.zeros_like(expected_accepted_sorted)
+    np.put_along_axis(expected_accept, expected_raw_order, expected_accepted_sorted, axis=1)
     with (output / "submission.csv").open(newline="") as stream:
         submission = list(csv.reader(stream))
     if len(submission) != len(query_ids) + 1:
         raise AssertionError("Submission query count mismatch")
-    for row, query_id, ranking in zip(submission[1:], query_ids, expected_order):
-        if row != [query_id, *gallery_ids[ranking]]:
-            raise AssertionError("Submission does not match exact cosine top-10")
+    for row, query_id, ranked_indices in zip(submission[1:], query_ids, expected_order):
+        if row != [query_id, *gallery_ids[ranked_indices]]:
+            raise AssertionError("Submission does not match saved-embedding cosine top-10")
     expected_rows = []
-    for query_id, ranking, row_scores, row_accepted in zip(
-            query_ids, expected_order, recomputed_top, expected_accept):
+    for query_id, ranked_indices, row_scores, row_accepted in zip(
+            query_ids, expected_order, expected_raw_top, expected_accept):
         if row_accepted.any():
             expected_rows.extend((query_id, str(gallery_ids[index]), float(cosine))
-                                 for index, cosine in zip(ranking[row_accepted], row_scores[row_accepted]))
+                                 for index, cosine in zip(ranked_indices[row_accepted], row_scores[row_accepted]))
         else:
             expected_rows.append((query_id, "", None))
     with (output / "candidates.csv").open(newline="") as stream:
@@ -146,6 +169,10 @@ def export(artifact_dir: Path, query_csv: Path, gallery_csv: Path,
         "schema_version": 1,
         "bundle_version": model["bundle_version"],
         "model_version": model["model_version"],
+        "ranking_algorithm": ranking,
+        "embeddings_semantics": "transductive_aqe_expanded" if ranking != "exact_cosine" else "base_encoder",
+        "embedding_order": "test_query.csv then test_gallery.csv, preserving row order within each",
+        "refusal_score_semantics": "raw cosine of unexpanded encoder embeddings",
         "policy_kind": calibration["policy_kind"],
         "policy_sha256": calibration["policy_sha256"],
         "source": {"query_csv_sha256": sha256(query_csv),

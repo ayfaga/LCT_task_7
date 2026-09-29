@@ -9,15 +9,19 @@
   <body class="workflow-page">
     <main class="workflow-shell">
       <a class="back-link" href="/">← Все действия</a>
-      <header class="workflow-header"><span class="flow-number">Шаг 2 · Пакетный поиск</span><h1>Изображения + BBox CSV</h1><p>Загрузите исходные фотографии и одну таблицу с координатами машин. Мы сопоставим каждую строку с изображением по <code>image_id</code>.</p></header>
+      <header class="workflow-header"><span class="flow-number">Шаг 2 · Пакетный поиск</span><h1>Изображения + BBox CSV</h1><p>Загрузите фотографии, папку или ZIP и весь CSV с координатами. Мы сами найдём строки для выбранных кадров по пути, имени файла или <code>image_id</code>; лишние строки не мешают.</p></header>
       <section class="workflow-card">
         <div class="section-header"><h2>1. Загрузите группу изображений</h2></div>
-        <label class="upload-tile" for="manyImages"><strong>Выбрать JPG/PNG</strong><span>Несколько файлов сразу; они остаются в браузере до запуска поиска</span><input id="manyImages" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" multiple /></label>
+        <div class="upload-grid">
+          <label class="upload-tile" for="manyImages"><strong>Выбрать JPG/PNG</strong><span>Несколько отдельных файлов</span><input id="manyImages" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" multiple /></label>
+          <label class="upload-tile" for="manyFolder"><strong>Выбрать папку</strong><span>Все JPG/PNG из неё и вложенных папок</span><input id="manyFolder" type="file" webkitdirectory directory multiple /></label>
+          <label class="upload-tile" for="manyArchive"><strong>Выбрать ZIP</strong><span>Архив обрабатывается по одному кадру</span><input id="manyArchive" type="file" accept=".zip,application/zip" /></label>
+        </div>
         <p id="manyImagesSummary" class="selection-summary">Изображения не выбраны.</p>
       </section>
       <section class="workflow-card">
         <div class="section-header"><h2>2. Добавьте BBox CSV</h2></div>
-        <p class="workflow-note">Обязательные колонки: <code>image_id,x,y,w,h</code>. Значение <code>image_id</code> — имя файла (например, <code>car01.jpg</code>); координаты — целые пиксели исходного изображения. Одна строка на каждый кадр.</p>
+        <p class="workflow-note">Обязательные колонки: <code>image_id,x,y,w,h</code> или <code>filename,x,y,w,h</code>. Координаты — целые пиксели исходного изображения. Можно приложить полный CSV: нужны строки только для выбранных кадров; неоднозначное совпадение не принимается.</p>
         <label class="upload-tile" for="manyCsv"><strong>Выбрать CSV</strong><span>Файл с BBox для каждого изображения</span><input id="manyCsv" type="file" accept=".csv,text/csv" /></label>
         <div id="coordTablePreview" class="bbox-table-preview hidden"></div>
       </section>
@@ -33,6 +37,7 @@
       </section>
     </main>
     <script src="/static/export.js?v=20260927-1"></script>
-    <script src="/static/many.js?v=20260929-2"></script>
+    <script src="/static/candidate_gallery.js?v=20260929-1"></script>
+    <script src="/static/many.js?v=20260929-4"></script>
   </body>
 </html>

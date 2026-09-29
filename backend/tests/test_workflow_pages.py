@@ -8,7 +8,7 @@ from app.main import app
 def test_home_links_to_gallery_batch_and_single():
     response = TestClient(app).get("/")
     assert response.status_code == 200
-    for route in ("/gallery", "/many", "/solo"):
+    for route in ("/gallery", "/many", "/solo", "/judge-export"):
         assert f'href="{route}"' in response.text
     assert 'data-route="/replenishment"' not in response.text
 
@@ -19,6 +19,7 @@ def test_workflow_pages_render_without_ml_service():
         ("/gallery", "Общая галерея автомобилей", "gallery.js"),
         ("/many", "Изображения + BBox CSV", "many.js"),
         ("/solo", "ручной BBox", "solo.js"),
+        ("/judge-export", "Экспорт для жюри", "judge_export.js"),
     ):
         response = client.get(route)
         assert response.status_code == 200

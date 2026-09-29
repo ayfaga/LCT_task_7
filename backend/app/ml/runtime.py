@@ -12,6 +12,7 @@ from uuid import uuid4
 import numpy as np
 from PIL import Image
 
+from .aqe import expand_transductive
 from .boosting import HybridBoostingPolicy
 from .encoder import E2Encoder, file_sha256
 from .gallery_db import GalleryDatabase
@@ -29,6 +30,9 @@ class MLRuntime:
         calibration_manifest = json.loads((artifact_dir / "calibration_manifest.json").read_text())
         self.model_version = model_manifest["model_version"]
         self.model_sha256 = model_manifest["model_sha256"]
+        self.batch_ranking = model_manifest.get("batch_ranking", "exact_cosine")
+        if self.batch_ranking not in {"exact_cosine", "transductive_aqe_k5_alpha025"}:
+            raise ValueError("Unsupported batch ranking algorithm")
         self.preprocessing_version = VERSION
         self.user_gallery_dir = Path(os.getenv("LCT_ML_USER_GALLERY_DIR", "/tmp/lct_gallery_state"))
         self.gallery_db = GalleryDatabase(os.getenv(
@@ -50,6 +54,8 @@ class MLRuntime:
         # A single worker may receive several requests in FastAPI's threadpool.
         # Serializing large ViT forwards bounds activation memory on CPU/GPU.
         self._inference_lock = Lock()
+        self._gallery_cache_lock = Lock()
+        self._gallery_cache: dict[str, tuple[int, tuple[np.ndarray, np.ndarray]]] = {}
         self.encoder = E2Encoder(
             artifact_dir / model_manifest["model_file"],
             model_manifest["model_sha256"], device=device,
@@ -107,15 +113,21 @@ class MLRuntime:
             raise GalleryNotReady("Add at least ten gallery images")
         if not re.fullmatch(r"gallery_[0-9]{4,}.npz", filename):
             raise ValueError("Invalid gallery archive name")
-        namespace = f"user:{gallery_id}"
-        stored = self.gallery_db.load(namespace, self.model_version, self.model_sha256)
-        expected_ids = [row["gallery_id"] for row in meta["images"]]
-        if stored is None or list(map(str, stored[0])) != expected_ids:
-            ids, vectors = self._read_gallery(folder / filename)
-            self.gallery_db.replace(namespace, ids, vectors, self.model_version,
-                                    self.model_sha256, meta["images"])
+        generation = int(meta["generation"])
+        with self._gallery_cache_lock:
+            cached = self._gallery_cache.get(gallery_id)
+            if cached is not None and cached[0] == generation:
+                return cached[1]
+            namespace = f"user:{gallery_id}"
             stored = self.gallery_db.load(namespace, self.model_version, self.model_sha256)
-        return stored
+            expected_ids = [row["gallery_id"] for row in meta["images"]]
+            if stored is None or list(map(str, stored[0])) != expected_ids:
+                ids, vectors = self._read_gallery(folder / filename)
+                self.gallery_db.replace(namespace, ids, vectors, self.model_version,
+                                        self.model_sha256, meta["images"])
+                stored = self.gallery_db.load(namespace, self.model_version, self.model_sha256)
+            self._gallery_cache[gallery_id] = generation, stored
+            return stored
 
     def build_gallery(self, gallery_id: str, job_id: str) -> dict:
         folder = self._custom_folder(gallery_id)
@@ -142,7 +154,7 @@ class MLRuntime:
             vectors.append(vector)
             meta["processed"] = offset
             self._write_meta(folder, meta)
-        if len(set(ids)) != len(ids) or len(ids) > 1000:
+        if len(set(ids)) != len(ids):
             raise ValueError("Invalid gallery ID set")
         # A prior worker can finish the archive write and then die before the
         # metadata switch. Preserve that archive and choose a fresh generation.
@@ -215,4 +227,70 @@ class MLRuntime:
             "candidates": visible_accepted,
             "threshold": self.policy.cosine_threshold,
             "confidence_semantics": "raw cosine similarity; not a probability",
+            "ranking_algorithm": "exact_cosine",
         }
+
+    def search_batch(self, queries: np.ndarray, topk: int = 10,
+                     gallery_id: str | None = None) -> list[dict]:
+        """Rank a complete query cohort against one versioned gallery.
+
+        AQE changes gallery vectors using the entire supplied query cohort;
+        it must never be presented as the single-query online algorithm.
+        Refusal consumes *raw cosine* of the AQE-selected candidates, sorted
+        internally as required by its versioned boosting policy.
+        """
+        queries = np.asarray(queries, dtype=np.float32)
+        if queries.ndim != 2 or queries.shape[1] != 1024 or not len(queries):
+            raise ValueError("Query embeddings must be a nonempty [queries, 1024] matrix")
+        if not np.isfinite(queries).all() or not np.allclose(np.linalg.norm(queries, axis=1), 1.0, atol=1e-4):
+            raise ValueError("Query embeddings must be finite and L2-normalized")
+        if not 1 <= topk <= 100:
+            raise ValueError("topk must be between 1 and 100")
+        # A single query is an online request, not the measured transductive
+        # cohort protocol. Keep the established cosine behavior and label it.
+        if self.batch_ranking == "exact_cosine" or len(queries) == 1:
+            return [self.search(query, topk=topk, gallery_id=gallery_id) for query in queries]
+        if gallery_id:
+            gallery_ids, gallery_embeddings = self._custom_gallery(gallery_id)
+        else:
+            if not self.search_ready:
+                raise GalleryNotReady("Default gallery is not loaded")
+            gallery_ids, gallery_embeddings = self.gallery_ids, self.gallery_embeddings
+        if len(gallery_ids) < 10:
+            raise GalleryNotReady("Add at least ten gallery images")
+
+        expanded_query, expanded_gallery = expand_transductive(queries, gallery_embeddings)
+        responses = []
+        for query, expanded in zip(queries, expanded_query):
+            with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+                raw = gallery_embeddings @ query
+                aqe = expanded_gallery @ expanded
+            if not np.isfinite(raw).all() or not np.isfinite(aqe).all():
+                raise RuntimeError("AQE search produced non-finite similarities")
+            order = np.argsort(-aqe, kind="stable")
+            internal = order[:10]
+            cosine_order = np.argsort(-raw[internal], kind="stable")
+            accepted_cosine = self.policy.accepted(raw[internal][cosine_order][None, :])[0]
+            accepted_internal = np.zeros(10, dtype=bool)
+            accepted_internal[cosine_order] = accepted_cosine
+            accepted_ids = set(gallery_ids[internal[accepted_internal]])
+            ranked = [{"gallery_id": str(gallery_ids[index]),
+                       "similarity": float(raw[index]),
+                       "confidence": float(raw[index]),
+                       "ranking_score": float(aqe[index])}
+                      for index in order[:topk]]
+            accepted = [candidate for candidate in ranked
+                        if candidate["gallery_id"] in accepted_ids]
+            responses.append({
+                "status": "matched" if accepted else "no_confident_match",
+                "model_version": self.model_version,
+                "gallery_id": gallery_id,
+                "ranked": ranked,
+                "accepted": accepted,
+                "candidates": accepted,
+                "threshold": self.policy.cosine_threshold,
+                "confidence_semantics": "raw cosine similarity; not a probability",
+                "ranking_algorithm": self.batch_ranking,
+                "query_cohort_size": len(queries),
+            })
+        return responses

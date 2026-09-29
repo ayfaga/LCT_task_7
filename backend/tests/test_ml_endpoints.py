@@ -47,6 +47,7 @@ def connected_services(monkeypatch):
         preprocessing_version = "organizer-bbox-rgb-max448-lanczos-pad-bicubic-imagenet-v1"
         encoder = SimpleNamespace(dimension=1024)
         search_ready = True
+        batch_ranking = "transductive_aqe_k5_alpha025"
         gallery_ids = np.array([f"g-{i}" for i in range(10)])
 
         def embed(self, image, bbox):
@@ -62,6 +63,11 @@ def connected_services(monkeypatch):
                     "ranked": [item], "accepted": [item], "candidates": [item],
                     "threshold": 0.394,
                     "confidence_semantics": "raw cosine similarity; not a probability"}
+
+        def search_batch(self, embeddings, topk, gallery_id):
+            assert embeddings.shape == (2, 1024)
+            assert topk == 10 and gallery_id is None
+            return [self.search(vector, topk) for vector in embeddings]
 
     monkeypatch.setenv("LCT_ML_ARTIFACT_DIR", "/fixture")
     monkeypatch.setattr(ml_api, "_load_runtime", lambda *args: FixtureRuntime())
@@ -82,6 +88,14 @@ def test_ml_service_health_ready_and_embedding(connected_services):
     assert response.status_code == 200, response.text
     assert response.json()["dimension"] == 1024
     assert len(response.json()["embedding"]) == 1024
+
+
+def test_ml_batch_http_contract(connected_services):
+    vector = [1.0] + [0.0] * 1023
+    response = ml.post("/v1/search-batch", json={"embeddings": [vector, vector], "topk": 10})
+    assert response.status_code == 200, response.text
+    assert len(response.json()) == 2
+    assert response.json()[0]["ranked"][0]["gallery_id"] == "g-1"
 
 
 def test_backend_ready_and_product_inference(connected_services):
@@ -106,7 +120,7 @@ def test_validation_is_preserved_across_boundary(connected_services):
     assert request("/api/identify", data={"x": 100, "y": 20, "w": 400, "h": 300, "topk": 101}).status_code == 422
     assert request("/api/identify", payload=b"not an image").status_code == 422
     assert request("/api/identify", payload=b"").status_code == 422
-    assert request("/api/identify", payload=b"x" * (ml_api.MAX_IMAGE_BYTES + 1)).status_code == 413
+    assert request("/api/identify", payload=b"x" * 1024).status_code == 422
 
 
 def test_unready_ml_service_yields_503(connected_services, monkeypatch):

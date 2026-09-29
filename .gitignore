@@ -34,12 +34,16 @@ Thumbs.db
 # Local databases / generated data
 *.sqlite3
 *.db
+gallery_state/
+uploads/
+model_artifacts/joint_l336
 
 # Project-specific runtime artifacts
 frontend/uploads/
 backend/.pytest_cache/
 .pytest_cache/
 backend/ml_artifacts/
+judge_exports/
 .deck_build/
 # Local-only jury drafts. The diagnostic PNG embeds organizer pixels.
 docs/LCT_Vehicle_ReID_jury_20260927*.pptx

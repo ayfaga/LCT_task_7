@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parent
 BACKEND_DIR = ROOT / "backend"
 BACKEND_REQUIREMENTS = BACKEND_DIR / "requirements.txt"
 ML_REQUIREMENTS = BACKEND_DIR / "requirements-ml.txt"
-DEFAULT_ARTIFACT_DIR = ROOT / "model_artifacts" / "joint_l336"
+DEFAULT_ARTIFACT_DIR = ROOT / "model_artifacts" / "strong_l336_aqe"
 
 sys.path.insert(0, str(BACKEND_DIR))
 from artifact_preflight import ArtifactError, verify_artifacts  # noqa: E402
@@ -153,6 +153,7 @@ def start_local_stack(
     env.setdefault("LCT_ML_GALLERY_DB_PATH", str(ROOT / "gallery_state" / "gallery.sqlite3"))
     env.setdefault("LCT_UPLOAD_DIR", str(ROOT / "uploads"))
     env.setdefault("LCT_GALLERY_STATE_DIR", str(ROOT / "gallery_state"))
+    env.setdefault("LCT_JUDGE_EXPORT_DIR", str(ROOT / "judge_exports"))
     env.setdefault("DATABASE_URL", f"sqlite:///{ROOT / 'local.db'}")
 
     print(f"\nBackend: http://127.0.0.1:{backend_port}/docs", flush=True)

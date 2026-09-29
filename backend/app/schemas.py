@@ -73,6 +73,9 @@ class EmbeddingCandidate(BaseModel):
     gallery_id: str
     similarity: float
     confidence: float
+    ranking_score: float | None = None
+    image_url: str | None = None
+    source_image_url: str | None = None
 
 
 class EmbeddingResponse(BaseModel):
@@ -95,3 +98,5 @@ class SearchResponse(BaseModel):
     candidates: list[EmbeddingCandidate]
     threshold: float
     confidence_semantics: str
+    ranking_algorithm: str = "exact_cosine"
+    query_cohort_size: int | None = None
