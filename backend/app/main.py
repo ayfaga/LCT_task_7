@@ -8,6 +8,7 @@ import json
 import tarfile
 import zipfile
 from pathlib import Path
+from threading import Lock
 from typing import Annotated
 from uuid import uuid4
 
@@ -39,6 +40,7 @@ from .schemas import (
 Base.metadata.create_all(bind=engine)
 app = FastAPI(title="LCT Case API", version="1.0.0")
 logger = logging.getLogger(__name__)
+_crop_lock = Lock()
 
 app.add_middleware(
     CORSMiddleware,
@@ -155,7 +157,20 @@ async def search_matches(
     form = {"x": x, "y": y, "w": w, "h": h, "topk": topk}
     if gallery_id:
         form["gallery_id"] = gallery_id
-    return await call_ml("/v1/search", _inference_upload(image), form)
+    result = await call_ml("/v1/search", _inference_upload(image), form)
+    if gallery_id:
+        # The scorer returns IDs, not image paths. Resolve only against the
+        # gallery that was actually searched, including entries beyond the
+        # bounded preview returned by GET /api/common-gallery.
+        records = {row["gallery_id"]: row for row in read_gallery(gallery_id)["images"]}
+        for group in ("ranked", "accepted", "candidates"):
+            for candidate in result.get(group, []):
+                record = records.get(candidate.get("gallery_id"))
+                if record:
+                    base = f"/api/galleries/{gallery_id}/images/{record['image_key']}"
+                    candidate["image_url"] = f"{base}/crop"
+                    candidate["source_image_url"] = base
+    return result
 
 
 async def _finish_gallery_import(gallery_id: str, job_id: str) -> None:
@@ -235,6 +250,31 @@ def gallery_image(gallery_id: str, image_key: str):
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Gallery image not found")
     return FileResponse(path)
+
+
+@app.get("/api/galleries/{gallery_id}/images/{image_key}/crop")
+def gallery_image_crop(gallery_id: str, image_key: str):
+    meta = read_gallery(gallery_id)
+    record = next((row for row in meta["images"] if row["image_key"] == image_key), None)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Gallery image not found")
+    folder = gallery_dir(gallery_id)
+    source = folder / "images" / image_key
+    if not source.is_file():
+        raise HTTPException(status_code=404, detail="Gallery image not found")
+    crops = folder / "crops"
+    target = crops / f"{image_key}.jpg"
+    with _crop_lock:
+        if not target.is_file():
+            crops.mkdir(exist_ok=True)
+            x, y, w, h = record["bbox"]
+            temporary = crops / f".{image_key}.{uuid4().hex}.tmp"
+            with Image.open(source) as original:
+                if x < 0 or y < 0 or w <= 0 or h <= 0 or x + w > original.width or y + h > original.height:
+                    raise HTTPException(status_code=422, detail="Stored gallery BBox is invalid")
+                original.crop((x, y, x + w, y + h)).convert("RGB").save(temporary, format="JPEG", quality=88)
+            os.replace(temporary, target)
+    return FileResponse(target, media_type="image/jpeg")
 
 
 @app.post("/api/requests", response_model=IdentificationRequestRead, status_code=status.HTTP_201_CREATED)

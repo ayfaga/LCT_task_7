@@ -73,6 +73,8 @@ class EmbeddingCandidate(BaseModel):
     gallery_id: str
     similarity: float
     confidence: float
+    image_url: str | None = None
+    source_image_url: str | None = None
 
 
 class EmbeddingResponse(BaseModel):

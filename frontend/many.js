@@ -100,15 +100,18 @@ function renderResults(results) {
     const top = payload?.status === 'matched' ? accepted[0] : null;
     const ranked = Array.isArray(payload?.ranked) ? payload.ranked.slice(0, 10) : [];
     const card = document.createElement('article'); card.className = 'many-result-card';
-    const image = document.createElement('img'); image.src = item.preview; image.alt = item.name; card.appendChild(image);
+    const overview = document.createElement('div'); overview.className = 'many-result-overview';
+    const image = document.createElement('img'); image.src = item.preview; image.alt = item.name; overview.appendChild(image);
     const caption = document.createElement('div'); caption.className = 'many-result-caption';
-    caption.innerHTML = `<strong>${error ? 'Ошибка обработки' : top ? escapeHtml(top.gallery_id) : 'Нет уверенного совпадения'}</strong><span>${top ? `cosine ${Number(top.confidence).toFixed(3)}` : ''}</span>`;
-    card.appendChild(caption);
+    caption.innerHTML = `<small>Запрос: ${escapeHtml(item.name)}</small><strong>${error ? 'Ошибка обработки' : top ? `Принят ID ${escapeHtml(top.gallery_id)}` : 'Нет уверенного совпадения'}</strong><span>${top ? `cosine ${Number(top.confidence).toFixed(3)} · не вероятность` : 'Ближайшие кандидаты — ниже'}</span>`;
+    overview.appendChild(caption); card.appendChild(overview);
     if (error) { const note = document.createElement('p'); note.className = 'result-error'; note.textContent = error.message; card.appendChild(note); }
     if (ranked.length) {
-      const details = document.createElement('details');
-      details.innerHTML = `<summary>Top‑10</summary><ol>${ranked.map((item) => `<li>${escapeHtml(item.gallery_id)} · cosine ${Number(item.confidence).toFixed(3)}</li>`).join('')}</ol>`;
-      card.appendChild(details);
+      const section = document.createElement('div'); section.className = 'many-candidate-section';
+      const heading = document.createElement('h3'); heading.textContent = `Все кандидаты top‑${ranked.length}`;
+      section.appendChild(heading);
+      section.appendChild(CandidateGallery.render(ranked, accepted));
+      card.appendChild(section);
     }
     resultsGrid.appendChild(card);
   }
