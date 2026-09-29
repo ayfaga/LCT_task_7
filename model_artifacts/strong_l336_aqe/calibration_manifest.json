@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "model_version": "dinov2-l14-l336-joint-cityflow-organizer-strong-best19-20260929",
+  "policy_kind": "hybrid_hist_gradient_boosting",
+  "policy_file": "boosting_policy.json",
+  "policy_sha256": "55f22986118c25c6cf57f4489605c525f3b198a417d4fad1994d093f742f5f8b",
+  "source_joblib_sha256": "b779a4bdfae5635b26811af7000cd2d72a6faf2ce3f63c9fbb8ae1e05fd79c8b",
+  "topk": 10,
+  "preserve_first_n": 3,
+  "cosine_threshold": 0.46199999999999997,
+  "booster_threshold": 0.151,
+  "score_semantics": "returned confidence is raw cosine of unexpanded model embeddings; booster score is internal",
+  "ranking_for_batch": "transductive_aqe_k5_alpha025",
+  "selection": "organizer calibration ID-group OOF; dev exploratory; no holdout",
+  "official_f1_grain_known": false,
+  "holdout_evaluated_for_policy_selection": false
+}

@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from ml.import_organizer_archive import encode_split, inspect_archive, validate_preprocessing
+from ml.import_organizer_archive import encode_split, inspect_archive, open_source, validate_preprocessing
 
 
 def make_archive(path, bad_bbox=False):
@@ -83,3 +83,20 @@ def test_bbox_outside_frame_fails_before_embedding(tmp_path):
 def test_importer_rejects_changed_preprocessing_contract():
     with pytest.raises(ValueError, match="unchanged joint L336 preprocessing"):
         validate_preprocessing({"architecture": "dinov2_vitl14", "input_size": 336})
+
+
+def test_same_bbox_contract_from_directory(tmp_path):
+    archive_path = tmp_path / "archive.zip"
+    gallery_id = make_archive(archive_path)
+    folder = tmp_path / "organizer"
+    (folder / "images").mkdir(parents=True)
+    with ZipFile(archive_path) as archive:
+        for name in archive.namelist():
+            destination = folder / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(archive.read(name))
+    splits, report = inspect_archive(folder)
+    assert report["gallery"] == report["query"] == 1
+    assert splits["gallery"][1][0][0] == gallery_id
+    with open_source(folder) as source:
+        assert source.open(f"images/{gallery_id}.jpg").read(2) == b"\xff\xd8"

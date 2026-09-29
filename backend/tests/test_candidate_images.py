@@ -72,14 +72,23 @@ def test_batch_zip_uses_full_csv_and_processes_each_query(tmp_path, monkeypatch)
     _write_json(gallery_dir(COMMON_GALLERY_ID) / "meta.json", meta)
     seen = []
 
-    async def search(path, image, form):
+    async def embed(path, image, form):
+        assert path == "/v1/embeddings"
         seen.append((image.filename, form["x"], form["y"], form["w"], form["h"]))
-        ranked = [{"gallery_id": "car1", "similarity": .9, "confidence": .9}]
-        return {"status": "matched", "model_version": "test", "gallery_id": COMMON_GALLERY_ID,
-                "ranked": ranked, "accepted": ranked, "candidates": ranked,
-                "threshold": .394, "confidence_semantics": "cosine"}
+        return {"embedding": [1.0] + [0.0] * 1023}
 
-    monkeypatch.setattr(backend_module, "call_ml", search)
+    async def rank(path, payload):
+        assert path == "/v1/search-batch"
+        assert len(payload["embeddings"]) == 2
+        ranked = [{"gallery_id": "car1", "similarity": .9, "confidence": .9}]
+        result = {"status": "matched", "model_version": "test", "gallery_id": COMMON_GALLERY_ID,
+                "ranked": ranked, "accepted": ranked, "candidates": ranked,
+                "threshold": .394, "confidence_semantics": "cosine",
+                "ranking_algorithm": "transductive_aqe_k5_alpha025", "query_cohort_size": 2}
+        return [result.copy(), result.copy()]
+
+    monkeypatch.setattr(backend_module, "call_ml", embed)
+    monkeypatch.setattr(backend_module, "call_ml_json", rank)
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, "w") as zipped:
         zipped.writestr("query/car1.png", _image(1))
@@ -95,3 +104,48 @@ def test_batch_zip_uses_full_csv_and_processes_each_query(tmp_path, monkeypatch)
     assert seen == [("car1.png", 2, 3, 10, 11), ("car2.png", 0, 0, 20, 20)]
     assert len(response.json()["results"]) == 2
     assert response.json()["results"][0]["payload"]["ranked"][0]["image_url"].endswith("/crop")
+    assert response.json()["results"][0]["payload"]["query_cohort_size"] == 2
+
+
+def test_batch_files_use_one_cohort_and_preserve_bad_query(tmp_path, monkeypatch):
+    monkeypatch.setenv("LCT_GALLERY_STATE_DIR", str(tmp_path))
+    from app.gallery_store import ensure_common_gallery, gallery_dir, read_gallery, _write_json
+    ensure_common_gallery()
+    meta = read_gallery(COMMON_GALLERY_ID)
+    meta.update(gallery_file="gallery_0001.npz", state="ready", images=[
+        {"gallery_id": f"car{i}", "image_key": f"key{i}.png", "filename": f"car{i}.png",
+         "bbox": [0, 0, 20, 20]} for i in range(1, 11)
+    ])
+    _write_json(gallery_dir(COMMON_GALLERY_ID) / "meta.json", meta)
+    calls = []
+
+    async def embed(path, image, form):
+        assert path == "/v1/embeddings"
+        calls.append(image.filename)
+        return {"embedding": [1.0] + [0.0] * 1023}
+
+    async def rank(path, payload):
+        assert path == "/v1/search-batch"
+        assert len(payload["embeddings"]) == 2
+        row = {"status": "no_confident_match", "model_version": "fixture",
+               "gallery_id": COMMON_GALLERY_ID, "ranked": [], "accepted": [],
+               "candidates": [], "threshold": .4, "confidence_semantics": "raw cosine",
+               "ranking_algorithm": "transductive_aqe_k5_alpha025", "query_cohort_size": 2}
+        return [row, row]
+
+    monkeypatch.setattr(backend_module, "call_ml", embed)
+    monkeypatch.setattr(backend_module, "call_ml_json", rank)
+    client = TestClient(backend_module.app)
+    manifest = b"image_id,x,y,w,h\nq1,0,0,20,20\nq2,0,0,20,20\nq3,0,0,20,20\n"
+    response = client.post("/api/infer-batch", data={"gallery_id": COMMON_GALLERY_ID}, files=[
+        ("images", ("q1.png", _image(1), "image/png")),
+        ("images", ("q2.png", b"broken", "image/png")),
+        ("images", ("q3.png", _image(3), "image/png")),
+        ("manifest", ("bbox.csv", manifest, "text/csv")),
+    ])
+    assert response.status_code == 200, response.text
+    rows = response.json()["results"]
+    assert calls == ["q1.png", "q3.png"]
+    assert [row["filename"] for row in rows] == ["q1.png", "q2.png", "q3.png"]
+    assert "error" in rows[1] and "payload" not in rows[1]
+    assert rows[0]["payload"]["query_cohort_size"] == 2

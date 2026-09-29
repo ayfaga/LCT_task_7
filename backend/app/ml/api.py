@@ -6,6 +6,7 @@ import logging
 import os
 from threading import Lock
 
+import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from PIL import Image, UnidentifiedImageError
@@ -22,6 +23,12 @@ app = FastAPI(title="LCT Vehicle ReID ML", version="1.0.0")
 
 class GalleryBuildRequest(BaseModel):
     job_id: str
+
+
+class BatchSearchRequest(BaseModel):
+    embeddings: list[list[float]]
+    topk: int = 10
+    gallery_id: str | None = None
 
 
 _runtime_lock = Lock()
@@ -103,6 +110,7 @@ def ready():
         "gallery_size": len(runtime.gallery_ids) if runtime.gallery_ids is not None else 0,
         "gallery_ready": runtime.search_ready,
         "ranking": "exact_cosine",
+        "batch_ranking": runtime.batch_ranking,
     }
 
 
@@ -153,6 +161,22 @@ def search(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@app.post("/v1/search-batch", response_model=list[SearchResponse])
+def search_batch(payload: BatchSearchRequest):
+    if not 1 <= payload.topk <= 100:
+        raise HTTPException(status_code=422, detail="topk must be between 1 and 100")
+    runtime = _runtime(require_gallery=payload.gallery_id is None)
+    try:
+        return runtime.search_batch(np.asarray(payload.embeddings, dtype=np.float32),
+                                    topk=payload.topk, gallery_id=payload.gallery_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Gallery not found") from exc
+    except GalleryNotReady as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @app.post("/internal/galleries/{gallery_id}/build")
 def build_gallery(gallery_id: str, payload: GalleryBuildRequest):
     runtime = _runtime()
@@ -162,3 +186,9 @@ def build_gallery(gallery_id: str, payload: GalleryBuildRequest):
         raise HTTPException(status_code=404, detail="Gallery not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+# Admin-only offline export. It reuses this worker's loaded encoder instead of
+# constructing a second 1.2 GB model and doubling peak memory.
+from .judge_export_api import create_router  # noqa: E402
+app.include_router(create_router(_runtime))

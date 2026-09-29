@@ -1,15 +1,17 @@
 # LCT Vehicle ReID prototype
 
-**Current ML default:** joint CityFlow+organizer DINOv2-L/14@336, best epoch 19,
-with a separately recalibrated shallow5 refusal policy. The 1.218 GB model
-file in `model_artifacts/joint_l336/` is tracked by Git LFS: run `git lfs pull`
+**Current ML default:** strong-augmentation joint CityFlow+organizer
+DINOv2-L/14@336, best epoch 19, with a model-matched boosting refusal
+policy and transductive AQE for multi-query batches. The 1.218 GB model
+file in `model_artifacts/strong_l336_aqe/` is tracked by Git LFS: run `git lfs pull`
 after cloning. A fresh installation starts with an **empty persistent gallery**;
 upload real images through the API/browser or pass a compatible, precomputed
 `LCT_ML_GALLERY_PATH`. No synthetic gallery is searched by default. Full version,
 checksums, measured quality and deployment gates are in
-[the joint-model handoff](docs/JOINT_L336_DEPLOYMENT_20260925.md).
+[the strong AQE integration guide](docs/STRONG_AQE_INTEGRATION_20260929.md).
 
-The older E2 artifacts remain available as a rollback by explicitly setting
+Older joint/E2 artifacts remain outside this Git checkout as local rollbacks.
+The E2 bundle can be selected explicitly by setting
 `LCT_ML_ARTIFACT_DIR=../data/derived/final_e2_hybrid` and
 `LCT_ML_GALLERY_PATH=../data/derived/final_e2_hybrid/test_gallery_e2.npz`.
 The rest of this README documents the existing API and user-gallery workflow.
@@ -24,6 +26,11 @@ the compatible gallery and all three submission files without unpacking the
 whole archive. The legacy `/replenishment` page stores files only; the new
 `/gallery` page indexes browser-sized batches for actual search. Docker gallery
 mounting has a dedicated opt-in override.
+
+For the **three-file jury export**, use the [console and browser guide](docs/JUDGE_EXPORT.md).
+The console accepts a ZIP or the same layout as a folder; `/judge-export` is a
+separate, explicitly enabled local browser mode for ZIP upload and verified
+downloads. Neither route mutates the shared search gallery.
 
 This branch provides a backend API and an isolated ML service for the selected
 joint encoder and hybrid refusal policy. The model remains a competition
@@ -65,8 +72,8 @@ open until a clean-machine rehearsal is recorded.
 Place the verified model artifact directory on the host. A precomputed gallery,
 if used, must be built by the **same** encoder. In the parent research workspace:
 
-- `./model_artifacts/joint_l336/` — LFS weight, manifests and portable boosting policy;
-- `../data/derived/joint_l336_20260925/test_gallery_joint.npz` — optional 750-image test gallery, **not mounted by default**.
+- `./model_artifacts/strong_l336_aqe/` — the single LFS weight, manifests and portable boosting policy;
+- no old gallery is mounted by default: its embeddings belong to another encoder.
 
 For another checkout, set `LCT_ML_ARTIFACT_DIR` to the absolute host path of
 the verified bundle. `LCT_ML_GALLERY_PATH` is read directly in a local Python
@@ -92,7 +99,7 @@ curl -F image=@/path/to/car.png -F x=0 -F y=0 -F w=640 -F h=360 \
   http://127.0.0.1:18000/api/identify
 ```
 
-`/api/identify`, `/api/infer` and `/v1/search` return the same search schema. `ranked` contains the cosine top-10; `accepted` (also exposed as `candidates` for compatibility) is the subset kept by the hybrid refusal policy. `status=no_confident_match` with `accepted=[]` is a successful empty answer. The candidate fields `similarity` and `confidence` are both raw cosine, **not** a calibrated probability. `/v1/embeddings` returns the normalized 1024D vector. `/health` checks the backend process; `/ready` checks database, ML artifacts and gallery.
+`/api/identify`, `/api/infer` and `/v1/search` return the same single-query schema. `ranked` contains the cosine top-10; `accepted` (also exposed as `candidates` for compatibility) is the subset kept by the hybrid refusal policy. `/api/infer-batch` processes a complete group with transductive AQE and reports `ranking_algorithm`; its `ranked` order is by `ranking_score`, not by the displayed raw cosine. `status=no_confident_match` with `accepted=[]` is a successful empty answer. The candidate fields `similarity` and `confidence` are raw cosine, **not** calibrated probabilities. `/v1/embeddings` returns the normalized 1024D base vector. `/health` checks the backend process; `/ready` checks database, ML artifacts and gallery.
 
 ## Upload the shared gallery
 
@@ -112,6 +119,6 @@ curl -F image=@/path/to/query.jpg -F x=0 -F y=0 -F w=640 -F h=360 \
 
 `POST /api/common-gallery/images` returns 202; poll `GET /api/common-gallery` until `state=ready` (or `collecting` if fewer than ten images). Search requires at least ten processed images because the fixed refusal policy uses cosine top-10. `POST /api/common-gallery/retry` retries a failed import. Legacy `/api/galleries` endpoints remain for existing clients and galleries; the new UI does not mix them into the common gallery. Gallery import no longer has fixed byte, ZIP or image-count caps: uploads are copied/decompressed one file at a time to disk. Available disk, image-decoder safety (50 megapixels per image), service timeout and practical exact-search RAM/latency are real constraints; this is not a claim of unlimited infrastructure capacity.
 
-Without a manifest, each image is treated as an already cropped vehicle and its filename stem becomes its ID. For full frames, send a CSV as the `manifest` field or put `manifest.csv` at the ZIP root. Columns: `filename,gallery_id,x,y,w,h`; `filename` matches the multipart filename or complete path inside ZIP (for example `images/car.jpg`), and BBox coordinates refer to the original image. Empty BBox means the whole image. Keep gallery IDs unique within a gallery. The packaged `/gallery` page accepts ZIP and a **separate** CSV together and shows indexing status. For the organizer's much larger original ZIP, the streaming CLI above remains preferable because it supports a resumable administrative workflow.
+Without a manifest, each image is treated as an already cropped vehicle and its filename stem becomes its ID. For full frames, send a CSV as the `manifest` field or put `manifest.csv` at the ZIP root. Columns: `filename,gallery_id,x,y,w,h`; `filename` matches the multipart filename or complete path inside ZIP (for example `images/car.jpg`), and BBox coordinates refer to the original image. Empty BBox means the whole image. Keep gallery IDs unique within a gallery. The packaged `/gallery` page accepts ZIP and a **separate** CSV together and shows indexing status. For the organizer's much larger original ZIP, the console importer remains preferable because it avoids browser transfer. An interrupted export must currently be rerun into a new empty output directory.
 
 Architecture, version contract and handoff details: [backend handoff](docs/BACKEND_HANDOFF.md), [backend developer guide](docs/BACKEND_DEVELOPER_GUIDE.md), and [ML package guide](backend/ml/README.md). The selected model's [training source and exact recipe](repro/README.md) are included. For the current evidence-based criteria audit see [Mac criteria audit](docs/CRITERIA_AUDIT_MAC_20260927.md); the earlier [startup diagnosis](docs/LOCAL_STARTUP_AND_CRITERIA_20260927.md) is historical.

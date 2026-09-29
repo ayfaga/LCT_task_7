@@ -65,6 +65,31 @@ async def call_ml(path: str, image: UploadFile, form: dict[str, int | str]) -> d
         raise HTTPException(status_code=502, detail="Invalid ML service response") from exc
 
 
+async def call_ml_json(path: str, payload: dict) -> list[dict]:
+    """Send only compact embeddings to the ML service for cohort ranking."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=3.0)) as client:
+            response = await client.post(f"{ml_url()}{path}", json=payload)
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=503, detail="ML service is unavailable") from exc
+    if response.status_code >= 500:
+        logger.error("ML request %s failed: HTTP %s", path, response.status_code)
+        raise HTTPException(status_code=503, detail="ML service failed; check ML service logs")
+    if response.status_code != 200:
+        try:
+            detail = response.json().get("detail", "ML request failed")
+        except ValueError:
+            detail = "ML request failed"
+        raise HTTPException(status_code=response.status_code, detail=detail)
+    try:
+        result = response.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="Invalid ML service response") from exc
+    if not isinstance(result, list):
+        raise HTTPException(status_code=502, detail="Invalid ML batch response")
+    return result
+
+
 async def build_ml_gallery(gallery_id: str, job_id: str) -> dict:
     async with httpx.AsyncClient(timeout=httpx.Timeout(3600.0, connect=3.0)) as client:
         response = await client.post(

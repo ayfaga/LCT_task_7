@@ -1320,6 +1320,32 @@ body.home-page { background: #edf2f5; color: #132636; }
 @media (max-width: 980px) { .home-hero { grid-template-columns: 1fr; } .home-gallery-card { grid-template-columns: auto 1fr; } .home-primary-link { grid-column: 2; justify-self: start; } }
 @media (max-width: 720px) { .home-shell { padding: 18px 14px 36px; } .nav-caption { display: none; } .home-hero { padding: 30px 24px; border-radius: 23px; } .home-flow { gap: 5px; padding: 15px 11px; } .home-flow strong { font-size: .78rem; } .home-flow small { display: none; } .home-gallery-card { grid-template-columns: 1fr; padding: 24px; } .home-primary-link { grid-column: 1; width: 100%; } .home-query-grid { grid-template-columns: 1fr; } .home-search-heading { display: block; } .home-search-heading p { margin-top: 8px; } .common-gallery-overview { grid-template-columns: auto 1fr; } .common-gallery-overview button { grid-column: 2; justify-self: start; } }
 
+/* Offline jury export is intentionally separate from the shared search gallery. */
+.home-judge-card { display: flex; align-items: center; justify-content: space-between; gap: 26px; margin-top: 28px; padding: 28px 30px; border: 1px solid #dce7ec; border-radius: 23px; background: #fff; box-shadow: 0 14px 34px rgba(24,59,76,.06); }
+.home-judge-card h2 { margin: 7px 0; color: #14344a; }
+.home-judge-card p { max-width: 660px; margin: 0; color: #63798a; line-height: 1.55; }
+.home-judge-card code, .judge-shell code { padding: 2px 5px; border-radius: 5px; background: #eaf2f5; font-size: .92em; }
+.home-judge-card .home-primary-link { flex: none; }
+.judge-back { color: #1a607a; text-decoration: none; font-weight: 750; }
+.judge-hero { margin-top: 28px; padding: clamp(28px, 5vw, 50px); border-radius: 27px; background: linear-gradient(125deg, #102a3e, #1e526a); color: white; }
+.judge-hero h1 { margin: 12px 0; font-size: clamp(2.2rem, 5vw, 3.7rem); }
+.judge-hero p { max-width: 750px; margin: 0; line-height: 1.6; color: #d9e8ed; }
+.judge-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; margin-top: 24px; }
+.judge-panel { min-width: 0; padding: 27px; border: 1px solid #dce7ec; border-radius: 23px; background: #fff; box-shadow: 0 14px 34px rgba(24,59,76,.06); }
+.judge-panel h2 { margin: 8px 0 15px; color: #14344a; }
+.judge-panel p { color: #526a7b; line-height: 1.6; }
+.judge-upload { display: flex; flex-direction: column; gap: 10px; margin: 24px 0 17px; padding: 20px; border: 2px dashed #b5d0db; border-radius: 16px; background: #f5fafb; }
+.judge-upload input { max-width: 100%; }
+.judge-upload small, .judge-note { color: #657d8b; line-height: 1.55; }
+.judge-button { border: 0; cursor: pointer; }
+.judge-button:disabled { opacity: .55; cursor: not-allowed; }
+.judge-panel progress { width: 100%; height: 13px; accent-color: #1d7895; }
+.judge-downloads { display: grid; gap: 9px; margin-top: 20px; }
+.judge-downloads a { display: flex; flex-direction: column; gap: 4px; padding: 13px 16px; border: 1px solid #d3e8df; border-radius: 12px; background: #edf9f3; color: #125c3c; text-decoration: none; font-weight: 800; overflow-wrap: anywhere; }
+.judge-downloads small { font-weight: 500; color: #527568; }
+.judge-info { margin-top: 22px; padding: 18px 20px; border-radius: 15px; background: #eaf2f5; color: #3c5969; line-height: 1.6; }
+@media (max-width: 800px) { .judge-layout { grid-template-columns: 1fr; } .home-judge-card { flex-direction: column; align-items: stretch; } .home-judge-card .home-primary-link { width: fit-content; } }
+
 /* The same visual top-10 appears for single and batch queries. */
 .solo-result-dialog { width: min(1080px, calc(100vw - 32px)); padding: clamp(18px, 3vw, 30px); }
 .solo-result-dialog .result-close { display: block; margin: 0 0 10px auto; }

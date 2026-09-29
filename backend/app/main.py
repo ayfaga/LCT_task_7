@@ -24,6 +24,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from . import gallery_store
+from .judge_export_routes import router as judge_export_router
 from .database import Base, engine, get_db
 from .gallery_store import (
     COMMON_GALLERY_ID, MAX_PIXELS, _clean_filename, _match_manifest_rows,
@@ -31,7 +32,7 @@ from .gallery_store import (
     gallery_dir, list_galleries, public_gallery, read_common_gallery,
     read_gallery, retry_import, stage_import,
 )
-from .ml_gateway import MAX_IMAGE_BYTES, build_ml_gallery, call_ml, get_ml_ready
+from .ml_gateway import MAX_IMAGE_BYTES, build_ml_gallery, call_ml, call_ml_json, get_ml_ready
 from .models import IdentificationRequest, ReplenishmentFile, ReplenishmentItem
 from .schemas import (
     IdentificationRequestCreate,
@@ -54,12 +55,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(judge_export_router)
 
 
 @app.middleware("http")
 async def disable_cache(request: Request, call_next):
     response = await call_next(request)
-    if request.url.path in {"/", "/solo", "/many", "/gallery", "/replenishment"} or request.url.path.startswith("/static/"):
+    if request.url.path in {"/", "/solo", "/many", "/gallery", "/replenishment", "/judge-export"} or request.url.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
@@ -114,6 +116,11 @@ def read_gallery_page() -> FileResponse:
     return FileResponse(os.path.join(STATIC_DIR, "gallery.html"))
 
 
+@app.get("/judge-export")
+def read_judge_export_page() -> FileResponse:
+    return FileResponse(os.path.join(STATIC_DIR, "judge_export.html"))
+
+
 @app.get("/replenishment")
 def read_replenishment() -> FileResponse:
     return FileResponse(os.path.join(STATIC_DIR, "replenishment.html"))
@@ -134,6 +141,7 @@ async def ready():
         return JSONResponse(status_code=503, content={"status": "not_ready"})
     return {"status": "ready", **{key: ml_state[key] for key in (
         "model_version", "preprocessing_version", "embedding_dimension", "gallery_size", "ranking")},
+            "batch_ranking": ml_state.get("batch_ranking", "exact_cosine"),
             "gallery_ready": ml_state.get("gallery_ready", ml_state["gallery_size"] > 0)}
 
 
@@ -183,15 +191,18 @@ async def search_matches(
 
 @app.post("/api/infer-batch")
 async def search_archive(
-    archive: UploadFile = File(...),
+    archive: UploadFile | None = File(None),
+    images: list[UploadFile] = File(default=[]),
     manifest: UploadFile = File(...),
     gallery_id: str = Form(...),
     topk: int = Form(default=10),
 ):
-    """Search a query ZIP sequentially; never expand the whole archive in RAM."""
+    """Embed images one by one, then rank the entire valid query cohort together."""
     if not 1 <= topk <= 100:
         raise HTTPException(status_code=422, detail="topk must be between 1 and 100")
-    if Path(archive.filename or "").suffix.lower() != ".zip":
+    if (archive is None) == (not images):
+        raise HTTPException(status_code=422, detail="Provide either a ZIP or image files")
+    if archive is not None and Path(archive.filename or "").suffix.lower() != ".zip":
         raise HTTPException(status_code=422, detail="Archive must be ZIP")
     info = public_gallery(read_gallery(gallery_id))
     if not info["search_ready"]:
@@ -199,62 +210,100 @@ async def search_archive(
     records = {row["gallery_id"]: row for row in read_gallery(gallery_id)["images"]}
     manifest.file.seek(0)
     rows = _parse_manifest(manifest.file)
-    archive.file.seek(0)
-    try:
-        with zipfile.ZipFile(archive.file) as zipped:
-            selected = []
-            for entry in zipped.infolist():
-                if entry.is_dir() or entry.filename.startswith("__MACOSX/"):
-                    continue
-                filename = _clean_filename(entry.filename)
-                if PurePosixPath(filename).name.startswith("._") or PurePosixPath(filename).name == ".DS_Store":
-                    continue
-                if entry.flag_bits & 1 or (entry.external_attr >> 16) & 0o170000 == 0o120000:
-                    raise HTTPException(status_code=422, detail="Encrypted files and links are unsupported")
-                if PurePosixPath(filename).suffix.lower() in {".csv", ".txt"}:
-                    continue
-                if PurePosixPath(filename).suffix.lower() not in {".jpg", ".jpeg", ".png"}:
-                    raise HTTPException(status_code=422, detail=f"Unsupported ZIP entry: {filename}")
-                selected.append((filename, entry))
-            if not selected:
-                raise HTTPException(status_code=422, detail="ZIP has no JPEG/PNG images")
-            matched = _match_manifest_rows(rows, [name for name, _ in selected], True)
-            results = []
-            for filename, entry in selected:
-                with TemporaryFile(mode="w+b") as temporary:
-                    with zipped.open(entry) as source:
-                        while chunk := source.read(1024 * 1024):
-                            if shutil.disk_usage(tempfile.gettempdir()).free < len(chunk) + gallery_store.DISK_RESERVE_BYTES:
-                                raise HTTPException(status_code=507, detail="Not enough free disk space for query ZIP")
-                            temporary.write(chunk)
-                    temporary.seek(0)
-                    try:
-                        with Image.open(temporary) as image:
-                            if image.format not in {"JPEG", "PNG"} or image.width * image.height > MAX_PIXELS:
-                                raise ValueError("Invalid image or dimensions")
-                            width, height = image.size
-                            image.load()
-                        row = matched[filename]
-                        x, y, w, h = [int(row[key]) for key in ("x", "y", "w", "h")]
-                        if x < 0 or y < 0 or w <= 0 or h <= 0 or x + w > width or y + h > height:
-                            raise ValueError("BBox is outside the image")
-                    except (UnidentifiedImageError, OSError, ValueError, TypeError, KeyError) as exc:
-                        results.append({"filename": filename, "error": f"Invalid image/BBox: {exc}"})
+    results: list[dict] = []
+    embeddings: list[list[float]] = []
+    valid_positions: list[int] = []
+
+    async def append_embedding(filename: str, upload: UploadFile, row: dict,
+                               width: int, height: int) -> None:
+        try:
+            x, y, w, h = [int(row[key]) for key in ("x", "y", "w", "h")]
+            if x < 0 or y < 0 or w <= 0 or h <= 0 or x + w > width or y + h > height:
+                raise ValueError("BBox is outside the image")
+            payload = await call_ml("/v1/embeddings", upload,
+                                    {"x": x, "y": y, "w": w, "h": h})
+            vector = payload.get("embedding")
+            if not isinstance(vector, list) or len(vector) != 1024:
+                raise ValueError("ML service returned an invalid embedding")
+            valid_positions.append(len(results))
+            embeddings.append(vector)
+            results.append({"filename": filename})
+        except (ValueError, TypeError, KeyError, HTTPException) as exc:
+            detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+            results.append({"filename": filename, "error": f"Invalid image/BBox: {detail}"})
+
+    if archive is None:
+        names = []
+        for upload in images:
+            if not upload.filename or Path(upload.filename).suffix.lower() not in {".jpg", ".jpeg", ".png"}:
+                raise HTTPException(status_code=422, detail="Only JPEG/PNG images are supported")
+            names.append(_clean_filename(upload.filename))
+        matched = _match_manifest_rows(rows, names, True)
+        for filename, upload in zip(names, images):
+            try:
+                upload.file.seek(0)
+                with Image.open(upload.file) as image:
+                    if image.format not in {"JPEG", "PNG"} or image.width * image.height > MAX_PIXELS:
+                        raise ValueError("Invalid image or dimensions")
+                    width, height = image.size
+                    image.load()
+                upload.file.seek(0)
+                await append_embedding(filename, upload, matched[filename], width, height)
+            except (UnidentifiedImageError, OSError, ValueError) as exc:
+                results.append({"filename": filename, "error": f"Invalid image/BBox: {exc}"})
+    else:
+        archive.file.seek(0)
+        try:
+            with zipfile.ZipFile(archive.file) as zipped:
+                selected = []
+                for entry in zipped.infolist():
+                    if entry.is_dir() or entry.filename.startswith("__MACOSX/"):
                         continue
-                    temporary.seek(0)
-                    upload = UploadFile(file=temporary, filename=PurePosixPath(filename).name)
-                    try:
-                        payload = await call_ml("/v1/search", upload, {
-                            "x": x, "y": y, "w": w, "h": h, "topk": topk, "gallery_id": gallery_id,
-                        })
-                    except HTTPException as exc:
-                        results.append({"filename": filename, "error": str(exc.detail)})
+                    filename = _clean_filename(entry.filename)
+                    if PurePosixPath(filename).name.startswith("._") or PurePosixPath(filename).name == ".DS_Store":
                         continue
-                    results.append({"filename": filename,
-                                    "payload": _attach_gallery_images(payload, gallery_id, records)})
-            return {"gallery_id": gallery_id, "results": results}
-    except (zipfile.BadZipFile, EOFError, RuntimeError) as exc:
-        raise HTTPException(status_code=422, detail="Invalid ZIP archive") from exc
+                    if entry.flag_bits & 1 or (entry.external_attr >> 16) & 0o170000 == 0o120000:
+                        raise HTTPException(status_code=422, detail="Encrypted files and links are unsupported")
+                    if PurePosixPath(filename).suffix.lower() in {".csv", ".txt"}:
+                        continue
+                    if PurePosixPath(filename).suffix.lower() not in {".jpg", ".jpeg", ".png"}:
+                        raise HTTPException(status_code=422, detail=f"Unsupported ZIP entry: {filename}")
+                    selected.append((filename, entry))
+                if not selected:
+                    raise HTTPException(status_code=422, detail="ZIP has no JPEG/PNG images")
+                matched = _match_manifest_rows(rows, [name for name, _ in selected], True)
+                for filename, entry in selected:
+                    with TemporaryFile(mode="w+b") as temporary:
+                        with zipped.open(entry) as source:
+                            while chunk := source.read(1024 * 1024):
+                                if shutil.disk_usage(tempfile.gettempdir()).free < len(chunk) + gallery_store.DISK_RESERVE_BYTES:
+                                    raise HTTPException(status_code=507, detail="Not enough free disk space for query ZIP")
+                                temporary.write(chunk)
+                        temporary.seek(0)
+                        try:
+                            with Image.open(temporary) as image:
+                                if image.format not in {"JPEG", "PNG"} or image.width * image.height > MAX_PIXELS:
+                                    raise ValueError("Invalid image or dimensions")
+                                width, height = image.size
+                                image.load()
+                            temporary.seek(0)
+                            upload = UploadFile(file=temporary, filename=PurePosixPath(filename).name)
+                            await append_embedding(filename, upload, matched[filename], width, height)
+                        except (UnidentifiedImageError, OSError, ValueError, TypeError, KeyError) as exc:
+                            results.append({"filename": filename, "error": f"Invalid image/BBox: {exc}"})
+        except (zipfile.BadZipFile, EOFError, RuntimeError) as exc:
+            raise HTTPException(status_code=422, detail="Invalid ZIP archive") from exc
+
+    if embeddings:
+        ranked = await call_ml_json("/v1/search-batch", {
+            "embeddings": embeddings, "topk": topk, "gallery_id": gallery_id,
+        })
+        if (len(ranked) != len(valid_positions)
+                or any(not isinstance(item, dict) for item in ranked)):
+            raise HTTPException(status_code=502, detail="Invalid ML batch response")
+        for position, payload in zip(valid_positions, ranked):
+            results[position]["payload"] = _attach_gallery_images(payload, gallery_id, records)
+    return {"gallery_id": gallery_id, "results": results}
 
 
 async def _finish_gallery_import(gallery_id: str, job_id: str) -> None:

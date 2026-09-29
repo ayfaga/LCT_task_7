@@ -60,6 +60,22 @@ def test_size_mismatch_rejected(tmp_path):
         verify_artifacts(model_dir, gallery)
 
 
+def test_versioned_bundle_requires_matching_refusal_policy(tmp_path):
+    model_dir, gallery = bundle(tmp_path)
+    model = json.loads((model_dir / "model_manifest.json").read_text())
+    model["model_version"] = "strong-fixture"
+    (model_dir / "model_manifest.json").write_text(json.dumps(model))
+    policy = b'{"model_version":"strong-fixture"}'
+    (model_dir / "calibration_manifest.json").write_text(json.dumps({
+        "model_version": "strong-fixture", "policy_file": "boosting_policy.json",
+        "policy_sha256": hashlib.sha256(policy).hexdigest(),
+    }))
+    with pytest.raises(ArtifactError, match="Refusal policy is missing"):
+        verify_artifacts(model_dir, gallery)
+    (model_dir / "boosting_policy.json").write_bytes(policy)
+    assert verify_artifacts(model_dir, gallery)["model_version"] == "strong-fixture"
+
+
 def test_quick_start_respects_gallery_override_and_fails_before_install(
     tmp_path, monkeypatch, capsys,
 ):

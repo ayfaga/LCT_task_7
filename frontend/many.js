@@ -119,15 +119,6 @@ function matchRows(images, table) {
   return matched;
 }
 
-function imageDimensions(url) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
-    image.onerror = () => reject(new Error('Не удалось открыть изображение.'));
-    image.src = url;
-  });
-}
-
 function renderResults(results) {
   latestResults = results;
   resultsGrid.replaceChildren();
@@ -144,7 +135,9 @@ function renderResults(results) {
       placeholder.textContent = 'Кадр из ZIP'; overview.appendChild(placeholder);
     }
     const caption = document.createElement('div'); caption.className = 'many-result-caption';
-    caption.innerHTML = `<small>Запрос: ${escapeHtml(item.name)}</small><strong>${error ? 'Ошибка обработки' : top ? `Принят ID ${escapeHtml(top.gallery_id)}` : 'Нет уверенного совпадения'}</strong><span>${top ? `cosine ${Number(top.confidence).toFixed(3)} · не вероятность` : 'Ближайшие кандидаты — ниже'}</span>`;
+    const ranking = payload?.ranking_algorithm === 'transductive_aqe_k5_alpha025'
+      ? `AQE по пакету из ${Number(payload.query_cohort_size) || 0} запросов · ` : '';
+    caption.innerHTML = `<small>Запрос: ${escapeHtml(item.name)}</small><strong>${error ? 'Ошибка обработки' : top ? `Принят ID ${escapeHtml(top.gallery_id)}` : 'Нет уверенного совпадения'}</strong><span>${ranking}${top ? `cosine ${Number(top.confidence).toFixed(3)} · не вероятность` : 'Ближайшие кандидаты — ниже; cosine не вероятность'}</span>`;
     overview.appendChild(caption); card.appendChild(overview);
     if (error) { const note = document.createElement('p'); note.className = 'result-error'; note.textContent = error.message; card.appendChild(note); }
     if (ranked.length) {
@@ -211,21 +204,19 @@ submitBtn.addEventListener('click', async () => {
       for (const row of data.results) results.push({ item: { name: row.filename, preview: null },
         payload: row.payload, error: row.error ? new Error(row.error) : null });
     } else {
-      for (const [index, file] of files.entries()) {
-        setStatus(`Обрабатываем ${index + 1} из ${files.length}: ${file.name}`);
-        const preview = URL.createObjectURL(file); activePreviewUrls.push(preview);
-        const item = { name: file.name, preview };
-        try {
-          const size = await imageDimensions(preview), bbox = matched.get(file);
-          if (bbox.x + bbox.w > size.width || bbox.y + bbox.h > size.height) throw new Error(`BBox выходит за пределы кадра ${size.width}×${size.height}.`);
-          const body = new FormData(); body.append('image', file, file.name);
-          for (const key of ['x', 'y', 'w', 'h']) body.append(key, String(bbox[key]));
-          body.append('topk', '10'); body.append('gallery_id', commonGallery.gallery_id);
-          const response = await fetch('/api/infer', { method: 'POST', body });
-          const payload = await response.json();
-          if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : `HTTP ${response.status}`);
-          results.push({ item, payload });
-        } catch (error) { results.push({ item, error }); }
+      setStatus(`Обрабатываем ${files.length} изображений совместно. Это может занять несколько минут.`);
+      const body = new FormData();
+      for (const file of files) body.append('images', file, file.webkitRelativePath || file.name);
+      body.append('manifest', csvInput.files[0]);
+      body.append('gallery_id', commonGallery.gallery_id); body.append('topk', '10');
+      const response = await fetch('/api/infer-batch', { method: 'POST', body });
+      const data = await response.json();
+      if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${response.status}`);
+      if (!Array.isArray(data.results) || data.results.length !== files.length) throw new Error('Пакетный ответ неполный.');
+      for (const [index, row] of data.results.entries()) {
+        const preview = URL.createObjectURL(files[index]); activePreviewUrls.push(preview);
+        results.push({ item: { name: row.filename, preview }, payload: row.payload,
+          error: row.error ? new Error(row.error) : null });
       }
     }
     renderResults(results);

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "bundle_version": "strong-l336-transductive-aqe-20260929",
+  "model_version": "dinov2-l14-l336-joint-cityflow-organizer-strong-best19-20260929",
+  "model_file": "model_inference.pt",
+  "model_sha256": "de955ba6ec3a2cb232708eddd1b1b57400bc449405d6d9e2ab25c791a46e617f",
+  "model_size_bytes": 1217580060,
+  "model_kind": "dinov2_normalized_cls",
+  "architecture": "dinov2_vitl14",
+  "input_size": 336,
+  "embedding_dimension": 1024,
+  "embedding_dtype": "float32",
+  "embedding_normalization": "l2",
+  "preprocessing_version": "organizer-bbox-rgb-max448-lanczos-pad-bicubic-imagenet-v1",
+  "preprocessing_sha256": "2e6187104dc6dfa166e50424e9ecb0314e6dce9982ba26708c00d0c32fda9287",
+  "source_training_checkpoint_sha256": "2853700826b72b05155949f70c64d720ac778ed3f9ac858b6d976a93d6f66700",
+  "source_pretrain_sha256": "d5383ea8f4877b2472eb973e0fd72d557c7da5d3611bd527ceeb1d7162cbf428",
+  "training_data": "organizer train + AIC21 Track2 CityFlow train; no holdout",
+  "batch_ranking": "transductive_aqe_k5_alpha025",
+  "solo_ranking": "exact_cosine"
+}

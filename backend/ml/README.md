@@ -1,11 +1,13 @@
-# ML adapter: current joint L336 and historical E2
+# ML adapter: strong L336 + batch AQE and historical rollbacks
 
-The **current** default bundle is the joint CityFlow+organizer L336 under
-`model_artifacts/joint_l336/` (Git LFS weight), with its own fitted policy.
-See [`docs/JOINT_L336_DEPLOYMENT_20260925.md`](../../docs/JOINT_L336_DEPLOYMENT_20260925.md)
-for its versions, thresholds, gallery mount and checks. The E2 paths and
-numbers below are retained only as rollback instructions; do not use the
-E2 booster or gallery with the joint encoder.
+The **current** default bundle is the strong-augmentation joint
+CityFlow+organizer DINOv2-L/14@336 under `model_artifacts/strong_l336_aqe/`
+(one Git LFS weight) with a model-matched portable boosting policy.
+Solo uses exact cosine; multi-query batches use transductive AQE k5/α.25.
+See [`docs/STRONG_AQE_INTEGRATION_20260929.md`](../../docs/STRONG_AQE_INTEGRATION_20260929.md)
+for scope, threshold/version contract and limitations. The earlier joint
+and E2 paths below are rollback history; never mix their booster or
+gallery embeddings with the strong encoder.
 
 ## Historical E2 rollback — do not use as the default
 
@@ -14,7 +16,7 @@ bundle, gallery and refusal calibration must stay together. The runnable
 two-service setup is in the repository root `README.md`.
 
 This directory is the ML-owned adapter in the backend repository. The current
-joint inference weight is tracked once via Git LFS outside this directory;
+strong inference weight is tracked once via Git LFS outside this directory;
 organizer images and secrets are not tracked. A separate persisted million-
 vector ANN *load-test service* is available in `ann_service.py`. It uses
 synthetic distractors and does not replace the exact production gallery.
@@ -57,7 +59,8 @@ python -m uvicorn app.ml.api:app --host 127.0.0.1 --port 8001 --workers 1
 The gallery NPZ must carry matching model version/SHA, unique IDs and L2
 normalized 1024D vectors. The runtime verifies model, policy, preprocessing,
 and gallery identity before serving. A missing/incompatible artifact returns
-`/ready` 503. Weights and gallery are external files/volumes, never git assets.
+`/ready` 503. The current inference weight is a Git LFS object; gallery
+images and embedding archives remain external runtime data, never Git assets.
 `/v1/embeddings` and `/v1/search` accept multipart image plus integer `x,y,w,h`
 (pixel `xywh` in the original image). `/v1/search` additionally accepts
 `topk` 1..100. It returns `ranked` exact-cosine results, `accepted` candidates

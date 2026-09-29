@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "bundle_version": "strong-l336-transductive-aqe-20260929",
+  "members": {
+    "model_inference.pt": {
+      "bytes": 1217580060,
+      "sha256": "de955ba6ec3a2cb232708eddd1b1b57400bc449405d6d9e2ab25c791a46e617f"
+    },
+    "model_manifest.json": {
+      "bytes": 1076,
+      "sha256": "5bd244ab3dc806a4ac719c4233e54d55036c552ccc1eb4972ed6f591c70bba4a"
+    },
+    "calibration_manifest.json": {
+      "bytes": 836,
+      "sha256": "eacd07230e2d93dbe6c18b0e545dc8303c85c86cc28ebdd9f29365d594c555b1"
+    },
+    "boosting_policy.json": {
+      "bytes": 64518,
+      "sha256": "55f22986118c25c6cf57f4489605c525f3b198a417d4fad1994d093f742f5f8b"
+    }
+  }
+}
