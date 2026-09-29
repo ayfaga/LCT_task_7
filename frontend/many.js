@@ -1,4 +1,6 @@
 const imageInput = document.getElementById('manyImages');
+const folderInput = document.getElementById('manyFolder');
+const archiveInput = document.getElementById('manyArchive');
 const csvInput = document.getElementById('manyCsv');
 const imageSummary = document.getElementById('manyImagesSummary');
 const tablePreview = document.getElementById('coordTablePreview');
@@ -11,6 +13,27 @@ let rows = [], latestResults = [], activePreviewUrls = [];
 let commonGallery = null;
 const escapeHtml = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 const stem = (value) => String(value).replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '').toLowerCase();
+const normalized = (value) => String(value).replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
+const basename = (value) => normalized(value).split('/').pop();
+const imageFiles = (input) => [...input.files].filter((file) => /\.(jpe?g|png)$/i.test(file.name));
+
+function selectedImages() {
+  if (archiveInput.files.length) return { mode: 'zip', archive: archiveInput.files[0], files: [] };
+  if (folderInput.files.length) return { mode: 'folder', files: imageFiles(folderInput) };
+  return { mode: 'files', files: [...imageInput.files] };
+}
+
+function updateImageSummary() {
+  const selection = selectedImages();
+  if (selection.archive) {
+    imageSummary.textContent = `ZIP: ${selection.archive.name}. Кадры будут обработаны по одному.`;
+    return;
+  }
+  const { files } = selection;
+  imageSummary.textContent = files.length
+    ? `${files.length} изображений${selection.mode === 'folder' ? ' из папки' : ''}: ${files.slice(0, 3).map((file) => file.name).join(', ')}${files.length > 3 ? '…' : ''}`
+    : 'Изображения не выбраны.';
+}
 
 function setStatus(message, kind = 'info') { statusBox.textContent = message; statusBox.className = `upload-status ${kind}`; }
 
@@ -50,19 +73,20 @@ function parseBboxCsv(content) {
   const table = splitCsv(text, delimiter);
   if (table.length < 2) throw new Error('CSV пуст или не содержит строк с BBox.');
   const headers = table.shift().map((column) => column.toLowerCase());
-  const required = ['image_id', 'x', 'y', 'w', 'h'];
+  const keyColumn = headers.includes('filename') ? 'filename' : 'image_id';
+  const required = [keyColumn, 'x', 'y', 'w', 'h'];
   if (required.some((name) => !headers.includes(name))) throw new Error(`Нужны колонки: ${required.join(', ')}.`);
   const parsed = table.map((cells, index) => {
     if (cells.length !== headers.length) throw new Error(`Строка ${index + 2}: число колонок не совпадает с заголовком.`);
     const record = Object.fromEntries(headers.map((name, i) => [name, cells[i]]));
-    if (!record.image_id) throw new Error(`Строка ${index + 2}: image_id пустой.`);
+    if (!record[keyColumn]) throw new Error(`Строка ${index + 2}: ${keyColumn} пустой.`);
     const box = {};
     for (const key of ['x', 'y', 'w', 'h']) {
       if (!/^-?\d+$/.test(record[key])) throw new Error(`Строка ${index + 2}: ${key} должен быть целым числом.`);
       box[key] = Number(record[key]);
     }
     if (box.x < 0 || box.y < 0 || box.w <= 0 || box.h <= 0) throw new Error(`Строка ${index + 2}: BBox должен быть положительным и находиться в кадре.`);
-    return { image_id: record.image_id, ...box };
+    return { image_id: record[keyColumn], ...box };
   });
   const names = parsed.map((row) => row.image_id.toLowerCase());
   if (new Set(names).size !== names.length) throw new Error('В CSV повторяется image_id.');
@@ -71,15 +95,27 @@ function parseBboxCsv(content) {
 
 function matchRows(images, table) {
   const matched = new Map(), used = new Set();
+  const indexes = [new Map(), new Map(), new Map()];
+  for (const row of table) {
+    [normalized(row.image_id), basename(row.image_id), stem(row.image_id)].forEach((key, index) => {
+      if (!indexes[index].has(key)) indexes[index].set(key, []);
+      indexes[index].get(key).push(row);
+    });
+  }
   for (const file of images) {
-    const name = file.name.toLowerCase();
-    const exact = table.filter((row) => row.image_id.toLowerCase() === name);
-    const candidates = exact.length ? exact : table.filter((row) => stem(row.image_id) === stem(name));
+    const path = file.webkitRelativePath || file.name;
+    const parts = normalized(path).split('/');
+    const pathMatch = parts.slice(1, -1).map((_, index) => indexes[0].get(parts.slice(index + 1).join('/')))
+      .find((entries) => entries?.length);
+    const candidates = indexes[0].get(normalized(path))
+      || pathMatch
+      || indexes[0].get(normalized(file.name))
+      || indexes[1].get(basename(file.name))
+      || indexes[2].get(stem(file.name)) || [];
     if (candidates.length !== 1) throw new Error(`Для «${file.name}» нужна ровно одна строка CSV; найдено ${candidates.length}.`);
     if (used.has(candidates[0])) throw new Error('Разные файлы сопоставились одной строке CSV. Уточните image_id.');
     used.add(candidates[0]); matched.set(file, candidates[0]);
   }
-  if (used.size !== table.length) throw new Error(`В CSV есть ${table.length - used.size} строк без соответствующих изображений.`);
   return matched;
 }
 
@@ -101,7 +137,12 @@ function renderResults(results) {
     const ranked = Array.isArray(payload?.ranked) ? payload.ranked.slice(0, 10) : [];
     const card = document.createElement('article'); card.className = 'many-result-card';
     const overview = document.createElement('div'); overview.className = 'many-result-overview';
-    const image = document.createElement('img'); image.src = item.preview; image.alt = item.name; overview.appendChild(image);
+    if (item.preview) {
+      const image = document.createElement('img'); image.src = item.preview; image.alt = item.name; overview.appendChild(image);
+    } else {
+      const placeholder = document.createElement('div'); placeholder.className = 'many-result-placeholder';
+      placeholder.textContent = 'Кадр из ZIP'; overview.appendChild(placeholder);
+    }
     const caption = document.createElement('div'); caption.className = 'many-result-caption';
     caption.innerHTML = `<small>Запрос: ${escapeHtml(item.name)}</small><strong>${error ? 'Ошибка обработки' : top ? `Принят ID ${escapeHtml(top.gallery_id)}` : 'Нет уверенного совпадения'}</strong><span>${top ? `cosine ${Number(top.confidence).toFixed(3)} · не вероятность` : 'Ближайшие кандидаты — ниже'}</span>`;
     overview.appendChild(caption); card.appendChild(overview);
@@ -119,14 +160,21 @@ function renderResults(results) {
 }
 
 imageInput.addEventListener('change', () => {
-  const files = [...imageInput.files];
-  imageSummary.textContent = files.length ? `${files.length} изображений: ${files.slice(0, 3).map((file) => file.name).join(', ')}${files.length > 3 ? '…' : ''}` : 'Изображения не выбраны.';
+  if (imageInput.files.length) { folderInput.value = ''; archiveInput.value = ''; }
+  updateImageSummary();
+});
+folderInput.addEventListener('change', () => {
+  if (folderInput.files.length) { imageInput.value = ''; archiveInput.value = ''; }
+  updateImageSummary();
+});
+archiveInput.addEventListener('change', () => {
+  if (archiveInput.files.length) { imageInput.value = ''; folderInput.value = ''; }
+  updateImageSummary();
 });
 csvInput.addEventListener('change', async () => {
   rows = []; tablePreview.classList.add('hidden');
   const file = csvInput.files[0]; if (!file) return;
   try {
-    if (file.size > 1024 * 1024) throw new Error('CSV больше 1 МиБ.');
     rows = parseBboxCsv(await file.text());
     tablePreview.innerHTML = `<strong>${escapeHtml(file.name)}</strong> · ${rows.length} строк<div class="bbox-table-scroll"><table><thead><tr><th>image_id</th><th>x</th><th>y</th><th>w</th><th>h</th></tr></thead><tbody>${rows.slice(0, 5).map((row) => `<tr><td>${escapeHtml(row.image_id)}</td><td>${row.x}</td><td>${row.y}</td><td>${row.w}</td><td>${row.h}</td></tr>`).join('')}</tbody></table></div>`;
     tablePreview.classList.remove('hidden'); setStatus(`CSV прочитан: ${rows.length} строк.`, 'success');
@@ -139,35 +187,50 @@ submitBtn.addEventListener('click', async () => {
   try { await loadCommonGallery(); }
   catch (error) { setStatus(error.message, 'error'); return; }
   if (!commonGallery?.search_ready) { setStatus('Общая галерея ещё не готова. Сначала добавьте минимум 10 автомобилей.', 'error'); return; }
-  const files = [...imageInput.files];
-  if (!files.length || !rows.length) { setStatus('Нужны и фотографии, и BBox CSV.', 'error'); return; }
+  const selection = selectedImages();
+  const files = selection.files;
+  if ((!files.length && !selection.archive) || !rows.length) { setStatus('Нужны фотографии или ZIP и BBox CSV.', 'error'); return; }
   let matched;
   try {
-    if (files.some((file) => !/\.(jpe?g|png)$/i.test(file.name) || file.size > 20 * 1024 * 1024)) throw new Error('Каждый файл должен быть JPG/PNG до 20 МиБ.');
-    matched = matchRows(files, rows);
+    if (selection.archive && !/\.zip$/i.test(selection.archive.name)) throw new Error('Нужен ZIP-архив.');
+    if (files.some((file) => !/\.(jpe?g|png)$/i.test(file.name))) throw new Error('Каждый файл должен быть JPG/PNG.');
+    if (!selection.archive) matched = matchRows(files, rows);
   } catch (error) { setStatus(error.message, 'error'); return; }
   submitBtn.disabled = true; resultsPanel.classList.add('hidden');
   activePreviewUrls.forEach((url) => URL.revokeObjectURL(url)); activePreviewUrls = [];
   const results = [];
   try {
-    for (const [index, file] of files.entries()) {
-      setStatus(`Обрабатываем ${index + 1} из ${files.length}: ${file.name}`);
-      const preview = URL.createObjectURL(file); activePreviewUrls.push(preview);
-      const item = { name: file.name, preview };
-      try {
-        const size = await imageDimensions(preview), bbox = matched.get(file);
-        if (bbox.x + bbox.w > size.width || bbox.y + bbox.h > size.height) throw new Error(`BBox выходит за пределы кадра ${size.width}×${size.height}.`);
-        const body = new FormData(); body.append('image', file, file.name);
-        for (const key of ['x', 'y', 'w', 'h']) body.append(key, String(bbox[key]));
-        body.append('topk', '10'); body.append('gallery_id', commonGallery.gallery_id);
-        const response = await fetch('/api/infer', { method: 'POST', body });
-        const payload = await response.json();
-        if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : `HTTP ${response.status}`);
-        results.push({ item, payload });
-      } catch (error) { results.push({ item, error }); }
+    if (selection.archive) {
+      setStatus(`Обрабатываем ZIP: ${selection.archive.name}. Это может занять несколько минут.`);
+      const body = new FormData(); body.append('archive', selection.archive);
+      body.append('manifest', csvInput.files[0]);
+      body.append('gallery_id', commonGallery.gallery_id); body.append('topk', '10');
+      const response = await fetch('/api/infer-batch', { method: 'POST', body });
+      const data = await response.json();
+      if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${response.status}`);
+      for (const row of data.results) results.push({ item: { name: row.filename, preview: null },
+        payload: row.payload, error: row.error ? new Error(row.error) : null });
+    } else {
+      for (const [index, file] of files.entries()) {
+        setStatus(`Обрабатываем ${index + 1} из ${files.length}: ${file.name}`);
+        const preview = URL.createObjectURL(file); activePreviewUrls.push(preview);
+        const item = { name: file.name, preview };
+        try {
+          const size = await imageDimensions(preview), bbox = matched.get(file);
+          if (bbox.x + bbox.w > size.width || bbox.y + bbox.h > size.height) throw new Error(`BBox выходит за пределы кадра ${size.width}×${size.height}.`);
+          const body = new FormData(); body.append('image', file, file.name);
+          for (const key of ['x', 'y', 'w', 'h']) body.append(key, String(bbox[key]));
+          body.append('topk', '10'); body.append('gallery_id', commonGallery.gallery_id);
+          const response = await fetch('/api/infer', { method: 'POST', body });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : `HTTP ${response.status}`);
+          results.push({ item, payload });
+        } catch (error) { results.push({ item, error }); }
+      }
     }
     renderResults(results);
     const failed = results.filter((item) => item.error).length;
     setStatus(`Готово: ${results.length - failed} обработано, ${failed} ошибок.`, failed ? 'error' : 'success');
-  } finally { submitBtn.disabled = false; }
+  } catch (error) { setStatus(error.message, 'error'); }
+  finally { submitBtn.disabled = false; }
 });

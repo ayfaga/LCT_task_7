@@ -5,10 +5,13 @@ import logging
 import os
 import csv
 import json
+import shutil
 import tarfile
+import tempfile
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from threading import Lock
+from tempfile import TemporaryFile
 from typing import Annotated
 from uuid import uuid4
 
@@ -20,9 +23,11 @@ from PIL import Image, UnidentifiedImageError
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from . import gallery_store
 from .database import Base, engine, get_db
 from .gallery_store import (
-    COMMON_GALLERY_ID, create_gallery, ensure_common_gallery, fail_import,
+    COMMON_GALLERY_ID, MAX_PIXELS, _clean_filename, _match_manifest_rows,
+    _parse_manifest, create_gallery, ensure_common_gallery, fail_import,
     gallery_dir, list_galleries, public_gallery, read_common_gallery,
     read_gallery, retry_import, stage_import,
 )
@@ -75,6 +80,18 @@ def _inference_upload(image: UploadFile) -> UploadFile:
     if not size:
         raise HTTPException(status_code=422, detail="Image file is empty")
     return image
+
+
+def _attach_gallery_images(result: dict, gallery_id: str, records: dict[str, dict]) -> dict:
+    """Resolve scored IDs only against the gallery used for this search."""
+    for group in ("ranked", "accepted", "candidates"):
+        for candidate in result.get(group, []):
+            record = records.get(candidate.get("gallery_id"))
+            if record:
+                base = f"/api/galleries/{gallery_id}/images/{record['image_key']}"
+                candidate["image_url"] = f"{base}/crop"
+                candidate["source_image_url"] = base
+    return result
 
 
 @app.get("/")
@@ -159,18 +176,85 @@ async def search_matches(
         form["gallery_id"] = gallery_id
     result = await call_ml("/v1/search", _inference_upload(image), form)
     if gallery_id:
-        # The scorer returns IDs, not image paths. Resolve only against the
-        # gallery that was actually searched, including entries beyond the
-        # bounded preview returned by GET /api/common-gallery.
         records = {row["gallery_id"]: row for row in read_gallery(gallery_id)["images"]}
-        for group in ("ranked", "accepted", "candidates"):
-            for candidate in result.get(group, []):
-                record = records.get(candidate.get("gallery_id"))
-                if record:
-                    base = f"/api/galleries/{gallery_id}/images/{record['image_key']}"
-                    candidate["image_url"] = f"{base}/crop"
-                    candidate["source_image_url"] = base
+        _attach_gallery_images(result, gallery_id, records)
     return result
+
+
+@app.post("/api/infer-batch")
+async def search_archive(
+    archive: UploadFile = File(...),
+    manifest: UploadFile = File(...),
+    gallery_id: str = Form(...),
+    topk: int = Form(default=10),
+):
+    """Search a query ZIP sequentially; never expand the whole archive in RAM."""
+    if not 1 <= topk <= 100:
+        raise HTTPException(status_code=422, detail="topk must be between 1 and 100")
+    if Path(archive.filename or "").suffix.lower() != ".zip":
+        raise HTTPException(status_code=422, detail="Archive must be ZIP")
+    info = public_gallery(read_gallery(gallery_id))
+    if not info["search_ready"]:
+        raise HTTPException(status_code=409, detail="Add at least ten gallery images before searching")
+    records = {row["gallery_id"]: row for row in read_gallery(gallery_id)["images"]}
+    manifest.file.seek(0)
+    rows = _parse_manifest(manifest.file)
+    archive.file.seek(0)
+    try:
+        with zipfile.ZipFile(archive.file) as zipped:
+            selected = []
+            for entry in zipped.infolist():
+                if entry.is_dir() or entry.filename.startswith("__MACOSX/"):
+                    continue
+                filename = _clean_filename(entry.filename)
+                if PurePosixPath(filename).name.startswith("._") or PurePosixPath(filename).name == ".DS_Store":
+                    continue
+                if entry.flag_bits & 1 or (entry.external_attr >> 16) & 0o170000 == 0o120000:
+                    raise HTTPException(status_code=422, detail="Encrypted files and links are unsupported")
+                if PurePosixPath(filename).suffix.lower() in {".csv", ".txt"}:
+                    continue
+                if PurePosixPath(filename).suffix.lower() not in {".jpg", ".jpeg", ".png"}:
+                    raise HTTPException(status_code=422, detail=f"Unsupported ZIP entry: {filename}")
+                selected.append((filename, entry))
+            if not selected:
+                raise HTTPException(status_code=422, detail="ZIP has no JPEG/PNG images")
+            matched = _match_manifest_rows(rows, [name for name, _ in selected], True)
+            results = []
+            for filename, entry in selected:
+                with TemporaryFile(mode="w+b") as temporary:
+                    with zipped.open(entry) as source:
+                        while chunk := source.read(1024 * 1024):
+                            if shutil.disk_usage(tempfile.gettempdir()).free < len(chunk) + gallery_store.DISK_RESERVE_BYTES:
+                                raise HTTPException(status_code=507, detail="Not enough free disk space for query ZIP")
+                            temporary.write(chunk)
+                    temporary.seek(0)
+                    try:
+                        with Image.open(temporary) as image:
+                            if image.format not in {"JPEG", "PNG"} or image.width * image.height > MAX_PIXELS:
+                                raise ValueError("Invalid image or dimensions")
+                            width, height = image.size
+                            image.load()
+                        row = matched[filename]
+                        x, y, w, h = [int(row[key]) for key in ("x", "y", "w", "h")]
+                        if x < 0 or y < 0 or w <= 0 or h <= 0 or x + w > width or y + h > height:
+                            raise ValueError("BBox is outside the image")
+                    except (UnidentifiedImageError, OSError, ValueError, TypeError, KeyError) as exc:
+                        results.append({"filename": filename, "error": f"Invalid image/BBox: {exc}"})
+                        continue
+                    temporary.seek(0)
+                    upload = UploadFile(file=temporary, filename=PurePosixPath(filename).name)
+                    try:
+                        payload = await call_ml("/v1/search", upload, {
+                            "x": x, "y": y, "w": w, "h": h, "topk": topk, "gallery_id": gallery_id,
+                        })
+                    except HTTPException as exc:
+                        results.append({"filename": filename, "error": str(exc.detail)})
+                        continue
+                    results.append({"filename": filename,
+                                    "payload": _attach_gallery_images(payload, gallery_id, records)})
+            return {"gallery_id": gallery_id, "results": results}
+    except (zipfile.BadZipFile, EOFError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid ZIP archive") from exc
 
 
 async def _finish_gallery_import(gallery_id: str, job_id: str) -> None:

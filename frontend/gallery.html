@@ -28,10 +28,10 @@
         <p id="gallerySelection" class="selection-summary" aria-live="polite">Файлы не выбраны.</p>
         <div class="workflow-actions"><button id="uploadGalleryBtn" class="action-btn" type="button">Добавить в общую галерею</button></div>
         <p id="galleryStatus" class="upload-status" role="status" aria-live="polite"></p>
-        <details class="workflow-help"><summary>Как подготовить BBox CSV?</summary><p>Для отдельных файлов подойдёт CSV организатора с колонками <code>image_id,x,y,w,h</code> или manifest <code>filename,gallery_id,x,y,w,h</code>. Для ZIP используйте <code>manifest.csv</code> внутри архива или приложите его отдельно. В колонке <code>filename</code> нужен путь внутри ZIP, например <code>images/car01.jpg</code>. Без CSV индексируется весь кадр.</p><p>Нет фиксированного лимита в МиБ или количестве файлов; обработка зависит от свободного диска и времени работы сервиса. Для многогигабайтного архива надёжнее CLI-импорт с возобновлением.</p></details>
+        <details class="workflow-help"><summary>Как подготовить BBox CSV?</summary><p>Подойдёт весь CSV организатора с <code>image_id,x,y,w,h</code> или manifest с <code>filename,gallery_id,x,y,w,h</code>. Можно загрузить только часть изображений из CSV: лишние строки игнорируются. Для ZIP допустим тот же внешний CSV или <code>manifest.csv</code> внутри архива. Сопоставление идёт по точному пути, затем имени файла и основе без расширения; неоднозначные совпадения блокируются. Без CSV индексируется весь кадр.</p><p>Нет фиксированного лимита в МиБ или количестве файлов; обработка зависит от свободного диска и времени работы сервиса. Для многогигабайтного архива надёжнее CLI-импорт с возобновлением.</p></details>
       </section>
       <nav class="next-actions"><a href="/solo">Проверить один снимок →</a><a href="/many">Проверить группу снимков →</a></nav>
     </main>
-    <script src="/static/gallery.js?v=20260929-2"></script>
+    <script src="/static/gallery.js?v=20260929-3"></script>
   </body>
 </html>

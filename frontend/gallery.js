@@ -61,57 +61,6 @@ function validateSelection() {
   return { images, archive, manifest };
 }
 
-function csvRows(text) {
-  const data = String(text).replace(/^\uFEFF/, '');
-  const header = data.split(/\r?\n/, 1)[0];
-  const delimiter = header.includes(';') ? ';' : header.includes('\t') ? '\t' : ',';
-  const result = []; let row = [], cell = '', quoted = false;
-  for (let i = 0; i < data.length; i += 1) {
-    const char = data[i];
-    if (char === '"') { if (quoted && data[i + 1] === '"') { cell += '"'; i += 1; } else quoted = !quoted; }
-    else if (!quoted && char === delimiter) { row.push(cell.trim()); cell = ''; }
-    else if (!quoted && (char === '\n' || char === '\r')) {
-      if (char === '\r' && data[i + 1] === '\n') i += 1;
-      row.push(cell.trim()); cell = '';
-      if (row.some(Boolean)) result.push(row);
-      row = [];
-    } else cell += char;
-  }
-  if (quoted) throw new Error('В CSV не закрыта кавычка.');
-  row.push(cell.trim()); if (row.some(Boolean)) result.push(row);
-  return result;
-}
-
-function quoteCsv(value) { return `"${String(value).replace(/"/g, '""')}"`; }
-
-async function normalizeManifest(file, images, archive) {
-  if (!file) return null;
-  const table = csvRows(await file.text());
-  if (table.length < 2) throw new Error('BBox CSV пуст.');
-  const headers = table[0].map((cell) => cell.toLowerCase());
-  if (headers.includes('filename')) {
-    if (['x', 'y', 'w', 'h'].some((key) => !headers.includes(key))) throw new Error('В manifest CSV нужны координаты x,y,w,h.');
-    return file;
-  }
-  if (!headers.includes('image_id') || ['x', 'y', 'w', 'h'].some((key) => !headers.includes(key))) {
-    throw new Error('BBox CSV должен содержать image_id,x,y,w,h или filename,gallery_id,x,y,w,h.');
-  }
-  if (archive) throw new Error('Для ZIP нужен CSV с колонкой filename и путями файлов внутри архива.');
-  const position = Object.fromEntries(headers.map((name, index) => [name, index]));
-  const used = new Set();
-  const lines = ['filename,gallery_id,x,y,w,h'];
-  for (const values of table.slice(1)) {
-    if (values.length !== headers.length) throw new Error('Число колонок в CSV не совпадает с заголовком.');
-    const id = values[position.image_id];
-    const image = images.find((item) => item.name.toLowerCase() === id.toLowerCase()) || images.find((item) => item.name.replace(/\.[^.]+$/, '').toLowerCase() === id.toLowerCase());
-    if (!image || used.has(image.name)) throw new Error(`Не удалось однозначно сопоставить image_id «${id}» с загруженным файлом.`);
-    used.add(image.name);
-    lines.push([image.name, id, ...['x', 'y', 'w', 'h'].map((key) => values[position[key]])].map(quoteCsv).join(','));
-  }
-  if (used.size !== images.length) throw new Error('Для каждого загруженного кадра нужна строка BBox CSV.');
-  return new File([lines.join('\n') + '\n'], 'manifest.csv', { type: 'text/csv' });
-}
-
 async function pollImport() {
   clearTimeout(activePoll);
   try {
@@ -152,8 +101,7 @@ uploadGalleryBtn.addEventListener('click', async () => {
     const form = new FormData();
     selection.images.forEach((file) => form.append('images', file));
     if (selection.archive) form.append('archive', selection.archive);
-    const normalizedManifest = await normalizeManifest(selection.manifest, selection.images, selection.archive);
-    if (normalizedManifest) form.append('manifest', normalizedManifest);
+    if (selection.manifest) form.append('manifest', selection.manifest);
     await apiJson('/api/common-gallery/images', { method: 'POST', body: form });
     galleryImages.value = ''; galleryArchive.value = ''; galleryManifest.value = ''; summarizeSelection();
     await pollImport();

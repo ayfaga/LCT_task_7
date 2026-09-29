@@ -154,14 +154,18 @@ def _parse_manifest(source) -> dict[str, dict]:
     try:
         with io.TextIOWrapper(source, encoding="utf-8-sig", newline="") as text:
             rows = csv.DictReader(text)
-            if not rows.fieldnames or "filename" not in rows.fieldnames:
-                raise ValueError("Manifest needs a filename column")
+            if not rows.fieldnames:
+                raise ValueError("BBox CSV needs a filename or image_id column")
+            rows.fieldnames = [name.strip().lower() for name in rows.fieldnames]
+            key_column = "filename" if "filename" in rows.fieldnames else "image_id"
+            if key_column not in rows.fieldnames or not {"x", "y", "w", "h"}.issubset(rows.fieldnames):
+                raise ValueError("BBox CSV needs filename or image_id, plus x,y,w,h")
             result = {}
             for row in rows:
-                filename = _clean_filename((row.get("filename") or "").strip())
-                if filename in result:
-                    raise ValueError("Duplicate manifest filename")
-                result[filename] = row
+                filename = _clean_filename((row.get(key_column) or "").strip().replace("\\", "/"))
+                if filename.casefold() in result:
+                    raise ValueError("Duplicate BBox CSV filename or image_id")
+                result[filename.casefold()] = (filename, row)
             return result
     except (UnicodeDecodeError, ValueError, csv.Error) as exc:
         raise HTTPException(status_code=422, detail=f"Invalid manifest: {exc}") from exc
@@ -216,9 +220,11 @@ def _uploaded_images(images: list[UploadFile] | None, archive: UploadFile | None
                     selected.append((filename, entry))
                 if external_manifest is not None and internal_manifest is not None:
                     raise HTTPException(status_code=422, detail="Supply one manifest only")
-                manifest_rows = external_manifest if external_manifest is not None else (internal_manifest or {})
-                _validate_manifest_names(manifest_rows, [name for name, _ in selected],
-                                         external_manifest is not None or internal_manifest is not None)
+                manifest_rows = _match_manifest_rows(
+                    external_manifest if external_manifest is not None else (internal_manifest or {}),
+                    [name for name, _ in selected],
+                    external_manifest is not None or internal_manifest is not None,
+                )
                 for filename, entry in selected:
                     path = scratch / uuid4().hex
                     with zipped.open(entry) as source:
@@ -227,9 +233,10 @@ def _uploaded_images(images: list[UploadFile] | None, archive: UploadFile | None
         except (BadZipFile, EOFError, RuntimeError) as exc:
             raise HTTPException(status_code=422, detail="Invalid ZIP archive") from exc
     else:
-        manifest_rows = external_manifest or {}
-        _validate_manifest_names(manifest_rows, [_clean_filename(image.filename or "") for image in images],
-                                 external_manifest is not None)
+        manifest_rows = _match_manifest_rows(
+            external_manifest or {}, [_clean_filename(image.filename or "") for image in images],
+            external_manifest is not None,
+        )
         for image in images:
             filename = _clean_filename(image.filename or "")
             image.file.seek(0)
@@ -266,13 +273,43 @@ def _uploaded_images(images: list[UploadFile] | None, archive: UploadFile | None
     return result
 
 
-def _validate_manifest_names(rows: dict[str, dict], filenames: list[str], required: bool) -> None:
+def _match_manifest_rows(rows: dict[str, tuple[str, dict]], filenames: list[str], required: bool) -> dict[str, dict]:
+    """Match a full CSV to only the uploaded images; never guess ambiguous BBoxes."""
     if len(set(filenames)) != len(filenames):
         raise HTTPException(status_code=422, detail="Duplicate image filename in upload")
-    if required and set(rows) != set(filenames):
-        missing = sorted(set(filenames) - set(rows))[:3]
-        extra = sorted(set(rows) - set(filenames))[:3]
-        raise HTTPException(status_code=422, detail=f"Manifest filenames must match uploaded images; missing={missing}, extra={extra}. Include ZIP paths such as images/car.jpg")
+    if not required:
+        return {}
+    indexes = ({}, {}, {})
+    for key, (name, row) in rows.items():
+        for index, token in zip(indexes, (
+            name.casefold(), PurePosixPath(name).name.casefold(), PurePosixPath(name).stem.casefold(),
+        )):
+            index.setdefault(token, []).append((key, row))
+    matched = {}
+    used = set()
+    for filename in filenames:
+        full = filename.casefold()
+        parts = PurePosixPath(filename).parts
+        suffixes = ["/".join(parts[start:]).casefold() for start in range(1, len(parts) - 1)]
+        path_match = next((indexes[0][suffix] for suffix in suffixes if suffix in indexes[0]), [])
+        options = (
+            indexes[0].get(full, []),
+            path_match,
+            indexes[1].get(PurePosixPath(filename).name.casefold(), []),
+            indexes[2].get(PurePosixPath(filename).stem.casefold(), []),
+        )
+        candidates = next((items for items in options if items), [])
+        if not candidates:
+            raise HTTPException(status_code=422, detail=f"BBox CSV has no row for uploaded image: {filename}")
+        if len(candidates) != 1:
+            raise HTTPException(status_code=422, detail=f"Ambiguous BBox CSV rows for: {filename}")
+        candidate = candidates[0]
+        key = candidate[0]
+        if key in used:
+            raise HTTPException(status_code=422, detail=f"One BBox CSV row matches multiple images: {filename}")
+        used.add(key)
+        matched[filename] = candidate[1]
+    return matched
 
 
 async def stage_import(gallery_id: str, images: list[UploadFile] | None,

@@ -161,7 +161,55 @@ def test_empty_supplied_manifest_never_falls_back_to_whole_frames(tmp_path, monk
         },
     )
     assert response.status_code == 422
-    assert "missing=" in response.json()["detail"]
+    assert "no row" in response.json()["detail"]
+
+
+def test_gallery_accepts_full_organizer_csv_for_selected_zip_subset(tmp_path, monkeypatch):
+    monkeypatch.setenv("LCT_GALLERY_STATE_DIR", str(tmp_path))
+
+    async def build(gallery_id, job_id):
+        from app.gallery_store import read_gallery, gallery_dir, _write_json
+        meta = read_gallery(gallery_id)
+        meta["images"].extend(meta["pending"])
+        meta.update(pending=[], gallery_file="gallery_0001.npz", state="ready", job_id=None)
+        _write_json(gallery_dir(gallery_id) / "meta.json", meta)
+
+    monkeypatch.setattr(backend_module, "build_ml_gallery", build)
+    csv_bytes = ("image_id,x,y,w,h\n"
+                 "unrelated_1,1,1,2,2\n"
+                 "car1,2,3,10,11\n"
+                 "unrelated_2,0,0,20,20\n"
+                 "car2.png,0,0,20,20\n").encode()
+    client = TestClient(backend_module.app)
+    response = client.post("/api/common-gallery/images", files={
+        "archive": ("subset.zip", archive({"nested/car1.png": photo(1), "nested/car2.png": photo(2)}), "application/zip"),
+        "manifest": ("all_gallery.csv", csv_bytes, "text/csv"),
+    })
+    assert response.status_code == 202, response.text
+    from app.gallery_store import read_gallery
+    meta = read_gallery(COMMON_GALLERY_ID)
+    assert [row["bbox"] for row in meta["images"]] == [[2, 3, 10, 11], [0, 0, 20, 20]]
+
+
+def test_ambiguous_full_csv_is_rejected_before_import(tmp_path, monkeypatch):
+    monkeypatch.setenv("LCT_GALLERY_STATE_DIR", str(tmp_path))
+    client = TestClient(backend_module.app)
+    response = client.post("/api/common-gallery/images", files={
+        "archive": ("one.zip", archive({"nested/car1.png": photo(1)}), "application/zip"),
+        "manifest": ("all.csv", b"filename,x,y,w,h\na/car1.png,0,0,20,20\nb/car1.png,0,0,20,20\n", "text/csv"),
+    })
+    assert response.status_code == 422
+    assert "Ambiguous" in response.json()["detail"]
+
+
+def test_root_folder_prefix_does_not_break_csv_path_matching():
+    from app.gallery_store import _match_manifest_rows, _parse_manifest
+    rows = _parse_manifest(io.BytesIO(
+        b"filename,x,y,w,h\nsub1/car.png,1,2,10,10\nsub2/car.png,3,4,10,10\n"
+    ))
+    matched = _match_manifest_rows(rows, ["uploaded/sub1/car.png", "uploaded/sub2/car.png"], True)
+    assert matched["uploaded/sub1/car.png"]["x"] == "1"
+    assert matched["uploaded/sub2/car.png"]["x"] == "3"
 
 
 def test_large_gallery_status_uses_total_count_and_bounded_preview():

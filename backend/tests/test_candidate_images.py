@@ -1,6 +1,7 @@
 """Search candidates must resolve to the exact gallery images they ranked."""
 
 import io
+import zipfile
 
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -57,3 +58,40 @@ def test_all_ranked_candidates_have_zoomable_gallery_images(tmp_path, monkeypatc
     assert Image.open(io.BytesIO(crop.content)).size == (10, 11)
     assert client.get(body["ranked"][0]["source_image_url"]).content == _image(1)
     assert client.get(f"/api/galleries/{COMMON_GALLERY_ID}/images/not-in-gallery/crop").status_code == 404
+
+
+def test_batch_zip_uses_full_csv_and_processes_each_query(tmp_path, monkeypatch):
+    monkeypatch.setenv("LCT_GALLERY_STATE_DIR", str(tmp_path))
+    from app.gallery_store import ensure_common_gallery, gallery_dir, read_gallery, _write_json
+    ensure_common_gallery()
+    meta = read_gallery(COMMON_GALLERY_ID)
+    meta.update(gallery_file="gallery_0001.npz", state="ready", images=[
+        {"gallery_id": f"car{i}", "image_key": f"key{i}.png", "filename": f"car{i}.png",
+         "bbox": [0, 0, 20, 20]} for i in range(1, 11)
+    ])
+    _write_json(gallery_dir(COMMON_GALLERY_ID) / "meta.json", meta)
+    seen = []
+
+    async def search(path, image, form):
+        seen.append((image.filename, form["x"], form["y"], form["w"], form["h"]))
+        ranked = [{"gallery_id": "car1", "similarity": .9, "confidence": .9}]
+        return {"status": "matched", "model_version": "test", "gallery_id": COMMON_GALLERY_ID,
+                "ranked": ranked, "accepted": ranked, "candidates": ranked,
+                "threshold": .394, "confidence_semantics": "cosine"}
+
+    monkeypatch.setattr(backend_module, "call_ml", search)
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as zipped:
+        zipped.writestr("query/car1.png", _image(1))
+        zipped.writestr("query/car2.png", _image(2))
+        zipped.writestr("query/notes.csv", "unrelated")
+    csv_bytes = b"image_id,x,y,w,h\nunused,0,0,20,20\ncar1,2,3,10,11\ncar2.png,0,0,20,20\n"
+    client = TestClient(backend_module.app)
+    response = client.post("/api/infer-batch", data={"gallery_id": COMMON_GALLERY_ID}, files={
+        "archive": ("queries.zip", stream.getvalue(), "application/zip"),
+        "manifest": ("all_queries.csv", csv_bytes, "text/csv"),
+    })
+    assert response.status_code == 200, response.text
+    assert seen == [("car1.png", 2, 3, 10, 11), ("car2.png", 0, 0, 20, 20)]
+    assert len(response.json()["results"]) == 2
+    assert response.json()["results"][0]["payload"]["ranked"][0]["image_url"].endswith("/crop")
