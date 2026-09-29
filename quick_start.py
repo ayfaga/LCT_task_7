@@ -79,7 +79,7 @@ def verify_ml_runtime_loadable(artifact_dir: Path, gallery_path: Path | None) ->
     try:
         MLRuntime(str(artifact_dir), gallery_arg, device)
     except ValueError as exc:
-        raise ArtifactError(f"ML runtime не загрузился: {exc}. Проверьте версию кода и артефактов; манифест не менялся.") from exc
+        raise ArtifactError(f"ML runtime не загрузился: {exc}. Проверьте версию кода и артефактов; манифест не менялся. ВНИМАНИЕ: если ошибка связано с SHA сертификатом, откройте backend/model_artifacts/strong_l336_aqe/model_manifest.json") from exc
     except Exception as exc:
         raise ArtifactError(f"ML runtime не загрузился: {type(exc).__name__}: {exc}") from exc
     print("[ok] ML preflight прошёл.", flush=True)
