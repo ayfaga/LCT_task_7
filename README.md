@@ -28,13 +28,15 @@ whole archive. The legacy `/replenishment` page stores files only; the new
 mounting has a dedicated opt-in override.
 
 For the **three-file jury export**, use the [console and browser guide](docs/JUDGE_EXPORT.md).
-The console accepts a ZIP or the same layout as a folder; `/judge-export` is a
-separate, explicitly enabled local browser mode for ZIP upload and verified
-downloads. Neither route mutates the shared search gallery.
+The console accepts a ready ZIP/folder or four separate fields (gallery CSV,
+gallery images, query CSV, query images); each images field can combine ZIPs,
+folders and individual JPEGs. `/judge-export` offers the same two visibly
+separate modes and verified downloads when explicitly enabled locally.
+Neither route mutates the shared search gallery.
 
 This branch provides a backend API and an isolated ML service for the selected
-joint encoder and hybrid refusal policy. The model remains a competition
-candidate, not a verified hidden-test winner.
+strong L336 encoder, batch AQE, and matching hybrid refusal policy. The model
+remains a competition candidate, not a verified hidden-test winner.
 
 ## Run
 

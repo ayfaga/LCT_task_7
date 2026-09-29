@@ -20,10 +20,39 @@
     <main class="judge-layout">
       <section class="judge-panel" aria-labelledby="inputTitle">
         <span class="section-kicker">Шаг 1 · Входные данные</span>
-        <h2 id="inputTitle">Выберите архив организаторов</h2>
-        <p>ZIP должен содержать <code>test_gallery.csv</code>, <code>test_query.csv</code> и <code>images/&lt;image_id&gt;.jpg</code>. В обеих таблицах обязательны <code>image_id,x,y,w,h</code>. CSV остаются в исходном порядке; BBox применяется к исходному кадру.</p>
-        <label class="judge-upload" for="judgeArchive"><strong>ZIP с исходными JPEG и двумя CSV</strong><input id="judgeArchive" type="file" accept=".zip,application/zip" /><small>Большой файл передаётся потоком. Убедитесь, что на сервере хватает диска; для многогигабайтных данных надёжнее консольная команда из документации.</small></label>
+        <h2 id="inputTitle">Подготовьте данные для экспорта</h2>
+        <p>Нужны исходные JPEG и BBox <code>image_id,x,y,w,h</code>. Режимы ниже явно разделены; оба создают одинаковые файлы сдачи и не меняют общую галерею поиска.</p>
+        <fieldset class="judge-mode">
+          <legend>Способ загрузки</legend>
+          <label><input type="radio" name="judgeMode" value="combined" checked /> Готовый архив целиком</label>
+          <label><input type="radio" name="judgeMode" value="components" /> Четыре поля: CSV и изображения галереи/запросов</label>
+        </fieldset>
+        <div id="judgeCombined">
+          <p>Один ZIP должен содержать <code>test_gallery.csv</code>, <code>test_query.csv</code> и <code>images/&lt;image_id&gt;.jpg</code>.</p>
+          <label class="judge-upload" for="judgeArchive"><strong>Готовый ZIP со всеми файлами</strong><input id="judgeArchive" type="file" accept=".zip,application/zip" /><small id="judgeArchiveName" aria-live="polite">Файл не выбран.</small><small>Большой файл передаётся потоком. Для многогигабайтных данных надёжнее консольная команда из документации.</small></label>
+        </div>
+        <div id="judgeComponents" hidden>
+          <p>В каждом поле изображений можно добавить ZIP, папку или отдельные JPEG; их разрешено смешивать. Имя JPEG должно совпадать с <code>image_id</code> в соответствующем CSV.</p>
+          <div class="judge-fields">
+            <label class="judge-upload" for="judgeGalleryCsv"><strong>1. CSV галереи</strong><input id="judgeGalleryCsv" type="file" accept=".csv,text/csv" /><small id="judgeGalleryCsvName" aria-live="polite">Файл не выбран.</small><small>Строки задают порядок объектов галереи.</small></label>
+            <div class="judge-upload judge-image-field" role="group" aria-label="Изображения галереи">
+              <strong>2. Изображения галереи</strong>
+              <label>Добавить ZIP или JPEG <input id="judgeGalleryFiles" type="file" accept=".zip,.jpg,.jpeg,application/zip,image/jpeg" multiple /></label>
+              <label>Или выбрать папку <input id="judgeGalleryFolder" type="file" webkitdirectory directory multiple /></label>
+              <small id="judgeGallerySummary" aria-live="polite">Пока ничего не выбрано.</small>
+            </div>
+            <label class="judge-upload" for="judgeQueryCsv"><strong>3. CSV запросов</strong><input id="judgeQueryCsv" type="file" accept=".csv,text/csv" /><small id="judgeQueryCsvName" aria-live="polite">Файл не выбран.</small><small>Строки задают порядок запросов.</small></label>
+            <div class="judge-upload judge-image-field" role="group" aria-label="Изображения запросов">
+              <strong>4. Изображения запросов</strong>
+              <label>Добавить ZIP или JPEG <input id="judgeQueryFiles" type="file" accept=".zip,.jpg,.jpeg,application/zip,image/jpeg" multiple /></label>
+              <label>Или выбрать папку <input id="judgeQueryFolder" type="file" webkitdirectory directory multiple /></label>
+              <small id="judgeQuerySummary" aria-live="polite">Пока ничего не выбрано.</small>
+            </div>
+          </div>
+          <label class="judge-partial"><input id="judgePartial" type="checkbox" /> Только тестовая подвыборка: пропустить строки CSV без загруженного JPEG и пометить результат как неполный</label>
+        </div>
         <button id="judgeStart" class="home-primary-link judge-button" type="button" disabled>Создать файлы сдачи <span aria-hidden="true">→</span></button>
+        <button id="judgeAbort" class="judge-abort" type="button" hidden>Отменить незавершённую загрузку</button>
         <p class="judge-note">Экспорт выполняется локально, без загрузки данных во внешние сервисы. Одновременно запускается только одна задача; до её окончания не закрывайте сервер.</p>
       </section>
       <section class="judge-panel" aria-labelledby="outputTitle">
@@ -44,6 +73,6 @@
       <strong>Важно:</strong> поле <code>confidence</code> — исходное cosine-сходство, а не вероятность. Файлы не содержат скрытых меток и не являются заявлением о результате на закрытом тесте. Консольный путь и Docker-команды описаны в <code>docs/JUDGE_EXPORT.md</code> репозитория.
     </section>
   </div>
-  <script src="/static/judge_export.js?v=20260929-1"></script>
+  <script src="/static/judge_export.js?v=20260929-3"></script>
 </body>
 </html>
